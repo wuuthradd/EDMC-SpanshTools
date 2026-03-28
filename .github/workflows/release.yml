@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate tag matches version.json
+        run: |
+          TAG_VERSION="${{ steps.version.outputs.version }}"
+          FILE_VERSION="$(python -c 'import json; print(json.load(open("version.json", "r", encoding="utf-8"))["version"])')"
+          test "${TAG_VERSION}" = "${FILE_VERSION}"
+
+      - name: Build release archive
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          ROOT="EDMC-SpanshTools"
+          ARCHIVE="${ROOT}-v${VERSION}.zip"
+
+          mkdir -p "dist/${ROOT}"
+          cp load.py version.json "dist/${ROOT}/"
+          cp -r SpanshTools tksheet "dist/${ROOT}/"
+
+          find "dist/${ROOT}" -type d -name __pycache__ -prune -exec rm -rf {} +
+          find "dist/${ROOT}" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+
+          (
+            cd dist
+            zip -r "../${ARCHIVE}" "${ROOT}"
+          )
+
+      - name: Smoke check release archive
+        run: |
+          ARCHIVE="EDMC-SpanshTools-v${{ steps.version.outputs.version }}.zip"
+          unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/load.py"
+          unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/version.json"
+          unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/SpanshTools/__init__.py"
+          unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/SpanshTools/fsd_specs.json"
+          unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/tksheet/__init__.py"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: v${{ steps.version.outputs.version }}
+          files: EDMC-SpanshTools-v${{ steps.version.outputs.version }}.zip

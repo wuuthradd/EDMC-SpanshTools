@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Verify Tk is available
+        run: python -c "import tkinter; tkinter.Tcl()"
+
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r dev-requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Run compileall
+        run: python -m compileall load.py update_fsd_specs.py SpanshTools tests

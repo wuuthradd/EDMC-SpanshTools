@@ -1,0 +1,599 @@
+{
+  "specs": {
+    "int_hyperdrive_overcharge_size2_class1": {
+      "class": 2,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 0.6,
+      "optimal_mass": 60.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size2_class2": {
+      "class": 2,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 0.9,
+      "optimal_mass": 90.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size2_class3": {
+      "class": 2,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 0.9,
+      "optimal_mass": 90.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size2_class4": {
+      "class": 2,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 0.9,
+      "optimal_mass": 90.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size2_class5": {
+      "class": 2,
+      "fuel_multiplier": 0.013,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 1.0,
+      "optimal_mass": 100.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size3_class1": {
+      "class": 3,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.2,
+      "optimal_mass": 100.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size3_class2": {
+      "class": 3,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.8,
+      "optimal_mass": 150.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size3_class3": {
+      "class": 3,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.8,
+      "optimal_mass": 150.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size3_class4": {
+      "class": 3,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.8,
+      "optimal_mass": 150.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size3_class5": {
+      "class": 3,
+      "fuel_multiplier": 0.013,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.9,
+      "optimal_mass": 167.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size4_class1": {
+      "class": 4,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 2.0,
+      "optimal_mass": 350.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size4_class2": {
+      "class": 4,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 3.0,
+      "optimal_mass": 525.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size4_class3": {
+      "class": 4,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 3.0,
+      "optimal_mass": 525.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size4_class4": {
+      "class": 4,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 3.0,
+      "optimal_mass": 525.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size4_class5": {
+      "class": 4,
+      "fuel_multiplier": 0.013,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 3.2,
+      "optimal_mass": 585.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size5_class1": {
+      "class": 5,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 3.3,
+      "optimal_mass": 700.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size5_class2": {
+      "class": 5,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 5.0,
+      "optimal_mass": 1050.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size5_class3": {
+      "class": 5,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 5.0,
+      "optimal_mass": 1050.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size5_class4": {
+      "class": 5,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 5.0,
+      "optimal_mass": 1050.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size5_class5": {
+      "class": 5,
+      "fuel_multiplier": 0.013,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 5.2,
+      "optimal_mass": 1175.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size6_class1": {
+      "class": 6,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 5.3,
+      "optimal_mass": 1200.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size6_class2": {
+      "class": 6,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 8.0,
+      "optimal_mass": 1800.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size6_class3": {
+      "class": 6,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 8.0,
+      "optimal_mass": 1800.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size6_class4": {
+      "class": 6,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 8.0,
+      "optimal_mass": 1800.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size6_class5": {
+      "class": 6,
+      "fuel_multiplier": 0.013,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 8.3,
+      "optimal_mass": 2000.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size7_class1": {
+      "class": 7,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 8.5,
+      "optimal_mass": 1800.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size7_class2": {
+      "class": 7,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 12.8,
+      "optimal_mass": 2700.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size7_class3": {
+      "class": 7,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 12.8,
+      "optimal_mass": 2700.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size7_class4": {
+      "class": 7,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 12.8,
+      "optimal_mass": 2700.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size7_class5": {
+      "class": 7,
+      "fuel_multiplier": 0.013,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 13.1,
+      "optimal_mass": 3000.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size8_class1": {
+      "class": 8,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.9,
+      "max_fuel_per_jump": 13.6,
+      "optimal_mass": 2800.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size8_class2": {
+      "class": 8,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.9,
+      "max_fuel_per_jump": 20.4,
+      "optimal_mass": 4200.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size8_class3": {
+      "class": 8,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.9,
+      "max_fuel_per_jump": 20.4,
+      "optimal_mass": 4200.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size8_class4": {
+      "class": 8,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.9,
+      "max_fuel_per_jump": 20.4,
+      "optimal_mass": 4200.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size8_class5": {
+      "class": 8,
+      "fuel_multiplier": 0.013,
+      "fuel_power": 2.9,
+      "max_fuel_per_jump": 20.7,
+      "optimal_mass": 4670.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_overcharge_size8_class5_overchargebooster_mkii": {
+      "class": 8,
+      "fuel_multiplier": 0.011,
+      "fuel_power": 2.5025,
+      "max_fuel_per_jump": 6.8,
+      "optimal_mass": 4670.0,
+      "rating": "A",
+      "supercharge_multiplier": 6
+    },
+    "int_hyperdrive_size2_class1": {
+      "class": 2,
+      "fuel_multiplier": 0.011,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 0.6,
+      "optimal_mass": 48.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size2_class2": {
+      "class": 2,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 0.6,
+      "optimal_mass": 54.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size2_class3": {
+      "class": 2,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 0.6,
+      "optimal_mass": 60.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size2_class4": {
+      "class": 2,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 0.8,
+      "optimal_mass": 75.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size2_class5": {
+      "class": 2,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.0,
+      "max_fuel_per_jump": 0.9,
+      "optimal_mass": 90.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size3_class1": {
+      "class": 3,
+      "fuel_multiplier": 0.011,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.2,
+      "optimal_mass": 80.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size3_class2": {
+      "class": 3,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.2,
+      "optimal_mass": 90.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size3_class3": {
+      "class": 3,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.2,
+      "optimal_mass": 100.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size3_class4": {
+      "class": 3,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.5,
+      "optimal_mass": 125.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size3_class5": {
+      "class": 3,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.15,
+      "max_fuel_per_jump": 1.8,
+      "optimal_mass": 150.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size4_class1": {
+      "class": 4,
+      "fuel_multiplier": 0.011,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 2.0,
+      "optimal_mass": 280.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size4_class2": {
+      "class": 4,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 2.0,
+      "optimal_mass": 315.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size4_class3": {
+      "class": 4,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 2.0,
+      "optimal_mass": 350.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size4_class4": {
+      "class": 4,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 2.5,
+      "optimal_mass": 437.5,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size4_class5": {
+      "class": 4,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.3,
+      "max_fuel_per_jump": 3.0,
+      "optimal_mass": 525.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size5_class1": {
+      "class": 5,
+      "fuel_multiplier": 0.011,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 3.3,
+      "optimal_mass": 560.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size5_class2": {
+      "class": 5,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 3.3,
+      "optimal_mass": 630.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size5_class3": {
+      "class": 5,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 3.3,
+      "optimal_mass": 700.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size5_class4": {
+      "class": 5,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 4.1,
+      "optimal_mass": 875.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size5_class5": {
+      "class": 5,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.45,
+      "max_fuel_per_jump": 5.0,
+      "optimal_mass": 1050.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size6_class1": {
+      "class": 6,
+      "fuel_multiplier": 0.011,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 5.3,
+      "optimal_mass": 960.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size6_class2": {
+      "class": 6,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 5.3,
+      "optimal_mass": 1080.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size6_class3": {
+      "class": 6,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 5.3,
+      "optimal_mass": 1200.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size6_class4": {
+      "class": 6,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 6.6,
+      "optimal_mass": 1500.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size6_class5": {
+      "class": 6,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.6,
+      "max_fuel_per_jump": 8.0,
+      "optimal_mass": 1800.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size7_class1": {
+      "class": 7,
+      "fuel_multiplier": 0.011,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 8.5,
+      "optimal_mass": 1440.0,
+      "rating": "E",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size7_class2": {
+      "class": 7,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 8.5,
+      "optimal_mass": 1620.0,
+      "rating": "D",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size7_class3": {
+      "class": 7,
+      "fuel_multiplier": 0.008,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 8.5,
+      "optimal_mass": 1800.0,
+      "rating": "C",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size7_class4": {
+      "class": 7,
+      "fuel_multiplier": 0.01,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 10.6,
+      "optimal_mass": 2250.0,
+      "rating": "B",
+      "supercharge_multiplier": 4
+    },
+    "int_hyperdrive_size7_class5": {
+      "class": 7,
+      "fuel_multiplier": 0.012,
+      "fuel_power": 2.75,
+      "max_fuel_per_jump": 12.8,
+      "optimal_mass": 2700.0,
+      "rating": "A",
+      "supercharge_multiplier": 4
+    }
+  },
+  "version": 1
+}
