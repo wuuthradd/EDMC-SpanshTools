@@ -141,6 +141,34 @@ def test_parse_coriolis_list_filters_and_normalizes_entries():
     assert "ignored_preengineered" not in parsed
 
 
+def test_parse_coriolis_list_skips_entries_rejected_by_bundled_validation():
+    payload = [
+        {
+            "symbol": "int_missing_hyperdrive",
+            "class": 0,
+            "rating": "Z",
+            "optmass": 0,
+            "maxfuel": 0,
+            "fuelpower": 0,
+            "fuelmul": 0,
+        },
+        {
+            "symbol": "Int_Hyperdrive_Size5_Class5",
+            "class": 5,
+            "rating": "A",
+            "optmass": 1050,
+            "maxfuel": 5,
+            "fuelpower": 2.45,
+            "fuelmul": 0.012,
+        },
+    ]
+
+    parsed = update_fsd_specs._parse_coriolis_list(payload)
+
+    assert "int_missing_hyperdrive" not in parsed
+    assert "int_hyperdrive_size5_class5" in parsed
+
+
 def test_update_fsd_specs_main_increments_bundled_version(monkeypatch):
     monkeypatch.setattr(
         update_fsd_specs,
@@ -185,7 +213,7 @@ def test_update_fsd_specs_main_increments_bundled_version(monkeypatch):
         },
     )
     captured = {}
-    monkeypatch.setattr(update_fsd_specs.pathlib.Path, "write_text", lambda self, text, encoding="utf-8": captured.setdefault("payload", text))
+    monkeypatch.setattr(update_fsd_specs, "_atomic_write_text", lambda _path, text: captured.setdefault("payload", text))
     monkeypatch.setattr(update_fsd_specs.fsd_data, "bundled_data_file_path", lambda: "SpanshTools/fsd_specs.json")
 
     assert update_fsd_specs.main([]) == 0
@@ -400,6 +428,24 @@ def test_install_staged_clears_bad_archive_and_metadata_on_failure(tmp_path):
     assert not os.path.exists(metadata_path)
 
 
+def test_install_staged_keeps_valid_archive_on_install_failure(tmp_path, monkeypatch):
+    plugin_dir = str(tmp_path)
+    _write_plugin_tree(plugin_dir)
+    archive_path = os.path.join(plugin_dir, SpanshUpdater.STAGED_ARCHIVE_NAME)
+    metadata_path = os.path.join(plugin_dir, SpanshUpdater.STAGED_METADATA_NAME)
+    with open(archive_path, "wb") as handle:
+        handle.write(_build_release_zip())
+    with open(metadata_path, "w", encoding="utf-8") as handle:
+        json.dump({"version": bump_patch(PLUGIN_VERSION)}, handle)
+
+    updater = SpanshUpdater(bump_patch(PLUGIN_VERSION), "https://example.invalid/update.zip", "", plugin_dir)
+    monkeypatch.setattr(updater, "_install_from_zip", lambda _path: False)
+
+    assert updater.install_staged() is False
+    assert os.path.exists(archive_path)
+    assert os.path.exists(metadata_path)
+
+
 def test_install_cleanup_failure_keeps_successful_install(tmp_path, monkeypatch):
     plugin_dir = str(tmp_path)
     _write_plugin_tree(plugin_dir)
@@ -468,6 +514,33 @@ def test_sync_repo_fsd_specs_updates_local_file_when_remote_differs(tmp_path, mo
 
     assert SpanshUpdater.sync_repo_fsd_specs(plugin_dir) is True
     reload_mock.assert_called_once()
+    with open(os.path.join(plugin_dir, "SpanshTools", "fsd_specs.json"), "r", encoding="utf-8") as handle:
+        assert json.load(handle) == _fsd_specs_payload(remote_specs, version=2)
+
+
+def test_sync_repo_fsd_specs_returns_false_when_reload_fails(tmp_path, monkeypatch):
+    plugin_dir = str(tmp_path)
+    _write_plugin_tree(plugin_dir)
+    remote_specs = {
+        "int_hyperdrive_size5_class5": {
+            "class": 5,
+            "rating": "A",
+            "optimal_mass": 1050.0,
+            "max_fuel_per_jump": 5.0,
+            "fuel_power": 2.45,
+            "fuel_multiplier": 0.012,
+            "supercharge_multiplier": 4,
+        }
+    }
+    monkeypatch.setattr(
+        updater_mod.requests,
+        "get",
+        lambda *args, **kwargs: _Response(json.dumps(_fsd_specs_payload(remote_specs, version=2)).encode("utf-8")),
+    )
+    monkeypatch.setattr(updater_mod.fsd_data, "bundled_data_file_path", lambda: os.path.join(plugin_dir, "SpanshTools", "fsd_specs.json"))
+    monkeypatch.setattr(updater_mod.fsd_data, "reload_specs_from_bundled_data", lambda: False)
+
+    assert SpanshUpdater.sync_repo_fsd_specs(plugin_dir) is False
     with open(os.path.join(plugin_dir, "SpanshTools", "fsd_specs.json"), "r", encoding="utf-8") as handle:
         assert json.load(handle) == _fsd_specs_payload(remote_specs, version=2)
 

@@ -136,7 +136,9 @@ class FakeSheet:
         self.popup_commands = {}
         self.current_selected = None
         self.current_yview = (0.0, 1.0)
+        self.current_xview = (0.0, 1.0)
         self.set_yview_calls = []
+        self.set_xview_calls = []
         self.set_currently_selected_calls = []
         self.see_calls = []
         self.region = ""
@@ -217,6 +219,13 @@ class FakeSheet:
     def set_yview(self, value):
         self.current_yview = (value, min(value + 0.5, 1.0))
         self.set_yview_calls.append(value)
+
+    def get_xview(self):
+        return self.current_xview
+
+    def set_xview(self, value):
+        self.current_xview = (value, min(value + 0.5, 1.0))
+        self.set_xview_calls.append(value)
 
     def get_column_data(self, *_args, **_kwargs):
         return []
@@ -318,6 +327,27 @@ def test_refresh_viewer_in_place_preserves_scroll_and_selection(router):
         assert sheet.set_yview_calls[-1] == 0.35
         assert sheet.set_currently_selected_calls[-1] == {"row": 1, "column": 0}
         assert sheet.see_calls == []
+
+
+def test_refresh_viewer_in_place_preserves_horizontal_scroll(router):
+    router.exact_plotter = True
+    router.route = [["Sol", "0", "0", "22000.47"], ["Ugrashtim", "1", "85.92", "21975.62"]]
+    router.exact_route_data = [
+        {"name": "Sol", "distance": 0, "distance_to_destination": 22000.47, "fuel_in_tank": 32.0, "fuel_used": 0.0, "must_refuel": True, "has_neutron": False},
+        {"name": "Ugrashtim", "distance": 85.92, "distance_to_destination": 21975.62, "fuel_in_tank": 26.84, "fuel_used": 5.16, "must_refuel": False, "has_neutron": False},
+    ]
+
+    with patch("SpanshTools.route_viewer.tk.Toplevel", FakeTopLevel), \
+         patch("SpanshTools.route_viewer.tk.Label", lambda *_args, **_kwargs: MagicMock()), \
+         patch("SpanshTools.route_viewer.tk.Menu", FakeMenu), \
+         _viewer_patches():
+        viewer = spans_mod.CsvViewerWindow(router)
+        viewer.show()
+        sheet = FakeSheet.last_instance
+        sheet.current_xview = (0.25, 0.75)
+
+        assert viewer._refresh_viewer_in_place(preserve_view=True) is True
+        assert sheet.set_xview_calls[-1] == 0.25
 
 
 def test_set_current_waypoint_from_exploration_meta_uses_route_index(router):
@@ -573,6 +603,7 @@ def test_fleet_viewer_export_helpers_use_pristine_and_yes_no_values(router):
             "is_system_pristine": True,
             "must_restock": True,
             "restock_amount": 25,
+            "is_waypoint": True,
             "done": True,
         }
     ]
@@ -584,6 +615,8 @@ def test_fleet_viewer_export_helpers_use_pristine_and_yes_no_values(router):
     assert export_row[0] == router._done_cell_value(True)
     assert export_row[8] == "Pristine"
     assert export_row[9] == "Yes"
+    assert export_header[4] == "Is Waypoint"
+    assert export_rows[0][4] == "Yes"
     assert export_header[-3:] == ["Icy Ring", "Pristine", "Restock Tritium"]
     assert export_rows[0][0] == "1"
     assert export_rows[0][-3:] == ["Yes", "Yes", "Yes"]

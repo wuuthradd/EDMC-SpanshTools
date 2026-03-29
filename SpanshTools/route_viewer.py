@@ -171,12 +171,17 @@ class CsvViewerWindow:
         self._csv_viewer_signature = signature
 
         current_yview = None
+        current_xview = None
         current_selection = None
         if preserve_view:
             try:
                 current_yview = sheet.get_yview()
             except Exception:
                 current_yview = None
+            try:
+                current_xview = sheet.get_xview()
+            except Exception:
+                current_xview = None
             try:
                 current_selection = sheet.get_currently_selected()
             except Exception:
@@ -203,6 +208,11 @@ class CsvViewerWindow:
                 if current_yview is not None:
                     try:
                         sheet.set_yview(current_yview[0])
+                    except Exception:
+                        pass
+                if current_xview is not None:
+                    try:
+                        sheet.set_xview(current_xview[0])
                     except Exception:
                         pass
                 if current_selection:
@@ -820,6 +830,7 @@ class CsvViewerWindow:
                 "System Name",
                 "Distance",
                 "Distance Remaining",
+                "Is Waypoint",
                 "Tritium in tank",
                 "Tritium in market",
                 "Fuel Used",
@@ -834,6 +845,7 @@ class CsvViewerWindow:
                     jump.get("name", ""),
                     jump.get("distance", ""),
                     jump.get("distance_to_destination", ""),
+                    self._yes_no(jump.get("is_waypoint")),
                     jump.get("fuel_in_tank", ""),
                     jump.get("tritium_in_market", ""),
                     jump.get("fuel_used", ""),

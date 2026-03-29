@@ -216,9 +216,23 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         # Title row — label centered, update button anchored right
         self.title_frame = tk.Frame(self.frame)
         self.title_lbl = tk.Label(self.title_frame, text=f"Spansh Tools v{self.plugin_version.strip()}", font=("", 10, "bold"))
-        self.title_lbl.pack(side=tk.LEFT, expand=True)
-        self.update_btn = tk.Button(self.title_frame, text="\u26A0", font=("", 9), fg="orange",
-                                     relief=tk.FLAT, cursor="hand2", command=self._show_update_popup)
+        self.title_lbl.pack()
+        self.update_btn = tk.Button(
+            self.title_frame,
+            text="Update",
+            font=("", 8, "bold"),
+            fg="#5C3A00",
+            bg="#F2C96D",
+            activeforeground="#4A2E00",
+            activebackground="#E7B84D",
+            relief=tk.GROOVE,
+            bd=1,
+            padx=4,
+            pady=0,
+            cursor="hand2",
+            command=self._show_update_popup,
+        )
+        self._update_btn_tooltip = Tooltip(self.update_btn, self._update_button_tooltip_text())
         # Hidden by default — shown when update is available
         self._update_btn_visible = False
         if self.update_available:
@@ -418,6 +432,40 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
 
     def _is_neutron_route_active(self):
         return self.route_type == "neutron"
+
+    def _update_button_text(self):
+        if self.has_staged_update():
+            return "Update Ready"
+        if self._staging_update:
+            return "Updating..."
+        return "Update"
+
+    def _update_button_tooltip_text(self):
+        if self.has_staged_update():
+            return "Update is staged and will install automatically when EDMC closes."
+        if self._staging_update:
+            return "Staging the update in the background. It will install when EDMC closes."
+        if self.spansh_updater:
+            return f"Version v{self.spansh_updater.version} is available. Click for details."
+        return "Update available. Click for details."
+
+    def _update_button_actionable(self):
+        return bool(self.spansh_updater) and not self._staging_update and not self.has_staged_update()
+
+    def _refresh_update_button_appearance(self):
+        button = getattr(self, "update_btn", None)
+        if button is None:
+            return
+        actionable = self._update_button_actionable()
+        button.configure(
+            text=self._update_button_text(),
+            cursor="hand2" if actionable else "",
+            activeforeground="#4A2E00" if actionable else "#5C3A00",
+            relief=tk.GROOVE if actionable else tk.FLAT,
+        )
+        tooltip = getattr(self, "_update_btn_tooltip", None)
+        if tooltip is not None:
+            tooltip.text = self._update_button_tooltip_text()
 
     def _buffer_startup_journal_event(self, system, entry, state):
         self._pending_journal_event = (
@@ -2657,6 +2705,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
 
         def worker():
             self._staging_update = True
+            if self.frame:
+                self._ui_call(self._refresh_update_button_appearance)
             try:
                 if self.spansh_updater.stage():
                     logger.info("SpanshTools update staged successfully")
@@ -2664,6 +2714,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 self._log_unexpected("Failed to stage update")
             finally:
                 self._staging_update = False
+                if self.frame:
+                    self._ui_call(self._refresh_update_button_appearance)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -2696,13 +2748,14 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
 
     def _show_update_button(self):
         """Show the update warning button next to the title."""
+        self._refresh_update_button_appearance()
         if not self._update_btn_visible:
-            self.update_btn.pack(side=tk.RIGHT, padx=(5, 0))
+            self.update_btn.place(relx=1.0, rely=0.5, x=0, y=0, anchor="e")
             self._update_btn_visible = True
 
     def _show_update_popup(self):
         """Show a popup with update info and install option."""
-        if not self.spansh_updater:
+        if not self._update_button_actionable():
             return
 
         win = tk.Toplevel(self.parent)

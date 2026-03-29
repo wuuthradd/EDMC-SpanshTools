@@ -255,8 +255,8 @@ class PlottersMixin:
 
         # Checkboxes — restore from saved settings if available
         s = self._exact_settings or {}
-        # Already Supercharged: auto-detect from JetConeBoost, fallback to saved settings
-        supercharged_default = self.is_supercharged or s.get("is_supercharged", False)
+        # Already Supercharged reflects only current live state.
+        supercharged_default = bool(getattr(self, "is_supercharged", False))
         self.exact_is_supercharged = tk.BooleanVar(value=supercharged_default)
         self.exact_use_supercharge = tk.BooleanVar(value=s.get("use_supercharge", True))
         self.exact_use_injections = tk.BooleanVar(value=s.get("use_injections", False))
@@ -2200,7 +2200,6 @@ class PlottersMixin:
             "destination": dest,
             "cargo": cargo_val,
             "reserve": reserve_val,
-            "is_supercharged": self.exact_is_supercharged.get(),
             "use_supercharge": self.exact_use_supercharge.get(),
             "use_injections": self.exact_use_injections.get(),
             "exclude_secondary": self.exact_exclude_secondary.get(),

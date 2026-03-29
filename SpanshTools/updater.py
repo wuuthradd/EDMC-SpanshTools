@@ -159,7 +159,9 @@ class SpanshUpdater:
             return False
 
         cls._save_local_fsd_specs(plugin_dir, remote_payload)
-        cls._reload_local_fsd_specs(plugin_dir)
+        if not cls._reload_local_fsd_specs(plugin_dir):
+            logger.warning("Updated bundled fsd_specs.json on disk but failed to reload runtime specs")
+            return False
         logger.info("Updated bundled fsd_specs.json from repository")
         return True
 
@@ -265,10 +267,11 @@ class SpanshUpdater:
         staged_zip = self._staged_archive_path()
         if not os.path.exists(staged_zip):
             return False
+        if not zipfile.is_zipfile(staged_zip):
+            self._clear_staged_artifacts()
+            return False
         installed = self._install_from_zip(staged_zip)
         if installed:
-            self._clear_staged_artifacts()
-        else:
             self._clear_staged_artifacts()
         return installed
 

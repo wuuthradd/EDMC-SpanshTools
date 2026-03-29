@@ -1143,6 +1143,13 @@ class TestPlotterSettings:
 
         assert router._settings_for_planner("Exomastery") == {"range": "56"}
 
+    def test_storing_new_planner_settings_keeps_previous_planner_settings(self, router):
+        router._store_plotter_settings("Exomastery", {"range": "56"})
+        router._store_plotter_settings("Neutron Plotter", {"range": "61"})
+
+        assert router._settings_for_planner("Exomastery") == {"range": "56"}
+        assert router._settings_for_planner("Neutron Plotter") == {"range": "61"}
+
 
 class TestFleetCarrierPlotter:
     def test_fleet_carrier_payload_builds_thread_params(self, router):

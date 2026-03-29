@@ -146,8 +146,8 @@ class OverlayMixin:
 
         # Route complete
         if self._route_complete_for_ui():
-            self._clear_route_overlays()
             if self.overlay_var.get() and not self._overlay_route_complete_announced:
+                self._clear_route_overlays()
                 self._send_overlay_message(
                     FUEL_OVERLAY_ID,
                     "Route Complete!",
@@ -158,7 +158,10 @@ class OverlayMixin:
                     size="huge",
                     error_message="Overlay send failed",
                 )
-            self._overlay_route_complete_announced = True
+                self._overlay_route_complete_announced = True
+            elif not self.overlay_var.get():
+                self._clear_route_overlays()
+                self._overlay_route_complete_announced = False
             return
 
         self._overlay_route_complete_announced = False
@@ -200,7 +203,7 @@ class OverlayMixin:
         # offset neutron Y to be 15 above fuel Y.
         actual_neutron_y = neutron_y
         if show_fuel and show_neutron and abs(fuel_y - neutron_y) < 15:
-            actual_neutron_y = fuel_y - 15
+            actual_neutron_y = max(fuel_y - 15, 0)
 
         # Fuel overlay
         if self.overlay_var.get():

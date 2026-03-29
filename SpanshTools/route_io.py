@@ -178,6 +178,10 @@ class RouteIOMixin:
                 last_done_index = index
         if last_done_index is None:
             return False
+        if last_done_index >= len(self.route) - 1:
+            self.offset = max(0, len(self.route) - 1)
+            self.next_stop = ""
+            return True
         next_index = min(last_done_index + 1, max(0, len(self.route) - 1))
         self.offset = next_index
         self.next_stop = self._route_name_at(self.offset, self._route_source_name(""))
@@ -214,6 +218,10 @@ class RouteIOMixin:
             break
 
         if target_index is None:
+            if last_done_route_index == len(self.route) - 1:
+                self.offset = max(0, len(self.route) - 1)
+                self.next_stop = ""
+                return True
             target_index = last_done_route_index
 
         if target_index is None or not (0 <= target_index < len(self.route)):
@@ -285,7 +293,25 @@ class RouteIOMixin:
         try:
             with open(self.plotter_settings_path, 'r') as f:
                 payload = json.load(f)
-            self._plotter_settings = payload if isinstance(payload, dict) else {}
+            if not isinstance(payload, dict):
+                self._plotter_settings = {}
+                return
+            planners = payload.get("planners")
+            normalized_planners = {}
+            if isinstance(planners, dict):
+                normalized_planners = {
+                    str(name): dict(settings or {})
+                    for name, settings in planners.items()
+                    if isinstance(name, str) and isinstance(settings, dict)
+                }
+            planner = str(payload.get("planner", "")).strip()
+            settings = dict(payload.get("settings", {}) or {}) if isinstance(payload.get("settings", {}), dict) else {}
+            if planner and settings and planner not in normalized_planners:
+                normalized_planners[planner] = dict(settings)
+            normalized_payload = dict(payload)
+            if normalized_planners:
+                normalized_payload["planners"] = normalized_planners
+            self._plotter_settings = normalized_payload
         except (FileNotFoundError, json.JSONDecodeError):
             self._plotter_settings = {}
         except Exception as exc:
@@ -310,16 +336,29 @@ class RouteIOMixin:
 
 
     def _store_plotter_settings(self, planner, settings):
+        planners = {}
+        existing = self._plotter_settings.get("planners", {})
+        if isinstance(existing, dict):
+            planners.update({
+                str(name): dict(values or {})
+                for name, values in existing.items()
+                if isinstance(name, str) and isinstance(values, dict)
+            })
+        planners[str(planner)] = dict(settings or {})
         self._plotter_settings = {
             "planner": planner,
-            "settings": settings,
+            "settings": dict(settings or {}),
+            "planners": planners,
         }
         self._save_plotter_settings()
 
 
     def _settings_for_planner(self, planner):
+        planners = self._plotter_settings.get("planners", {})
+        if isinstance(planners, dict) and planner in planners:
+            return dict(planners.get(planner, {}) or {})
         if self._plotter_settings.get("planner") == planner:
-            return dict(self._plotter_settings.get("settings", {}))
+            return dict(self._plotter_settings.get("settings", {}) or {})
         return {}
 
 
@@ -391,15 +430,15 @@ class RouteIOMixin:
             source = self._exact_settings.get("source", source)
             destination = self._exact_settings.get("destination", destination)
         elif self.route_type == "neutron":
-            settings = self._plotter_settings.get("settings", {}) if self._plotter_settings.get("planner") == "Neutron Plotter" else {}
+            settings = self._settings_for_planner("Neutron Plotter")
             source = settings.get("source", source)
             destination = settings.get("destination", destination)
         elif self.route_type == "exploration":
-            settings = self._plotter_settings.get("settings", {}) if self._plotter_settings.get("planner") == self.exploration_mode else {}
+            settings = self._settings_for_planner(self.exploration_mode)
             source = settings.get("source", source)
             destination = settings.get("destination", destination)
         elif self.route_type == "fleet_carrier":
-            settings = self._plotter_settings.get("settings", {}) if self._plotter_settings.get("planner") == "Fleet Carrier Router" else {}
+            settings = self._settings_for_planner("Fleet Carrier Router")
             source = settings.get("source", source)
             destinations = settings.get("destinations", []) if isinstance(settings.get("destinations", []), list) else []
             if destinations:
@@ -980,7 +1019,7 @@ class RouteIOMixin:
 
 
     def _neutron_highlight_names(self):
-        settings = self._plotter_settings.get("settings", {}) if self._plotter_settings.get("planner") == "Neutron Plotter" else {}
+        settings = self._settings_for_planner("Neutron Plotter")
         names = set()
         for value in settings.get("vias", []) or []:
             text = str(value).strip().lower()
@@ -1087,7 +1126,9 @@ class RouteIOMixin:
                 name = id_to_name.get(raw_value)
                 if not name and raw_value.lower() in known_jump_names:
                     name = raw_value
-                if not name or (source and name.lower() == source.lower()) or name.lower() in seen_destinations:
+                if not name:
+                    continue
+                if (source and name.lower() == source.lower()) or name.lower() in seen_destinations:
                     continue
                 seen_destinations.add(name.lower())
                 destinations.append(name)
@@ -1101,8 +1142,16 @@ class RouteIOMixin:
             refuel_destinations = []
         mapped_refuel_destinations = []
         seen_refuel = set()
+        known_jump_names = {
+            str(jump.get("name", "")).strip().lower()
+            for jump in jumps
+            if str(jump.get("name", "")).strip()
+        }
         for value in refuel_destinations:
-            name = id_to_name.get(str(value).strip(), str(value).strip())
+            raw_value = str(value).strip()
+            name = id_to_name.get(raw_value)
+            if not name and raw_value.lower() in known_jump_names:
+                name = raw_value
             if name and name.lower() not in seen_refuel:
                 seen_refuel.add(name.lower())
                 mapped_refuel_destinations.append(name)
@@ -1140,9 +1189,7 @@ class RouteIOMixin:
 
 
     def _merged_plotter_settings(self, planner, defaults):
-        settings = {}
-        if self._plotter_settings.get("planner") == planner:
-            settings = dict(self._plotter_settings.get("settings", {}) or {})
+        settings = self._settings_for_planner(planner)
         merged = dict(defaults)
         merged.update({key: value for key, value in settings.items() if value not in (None, "")})
         return merged
@@ -1581,7 +1628,7 @@ class RouteIOMixin:
             self.jumps_left = max(self.jumps_left, jumps_remaining)
 
         if self.fleet_carrier_data and not any(jump.get("is_waypoint") for jump in self.fleet_carrier_data):
-            settings = self._plotter_settings.get("settings", {}) if self._plotter_settings.get("planner") == "Fleet Carrier Router" else {}
+            settings = self._settings_for_planner("Fleet Carrier Router")
             self._apply_fleet_waypoint_flags(self.fleet_carrier_data, settings=settings)
 
         for index in range(1, len(self.fleet_carrier_data)):
@@ -1836,6 +1883,7 @@ class RouteIOMixin:
         if not isinstance(settings, dict):
             settings = {}
         normalized = dict(settings)
+        normalized.pop("is_supercharged", None)
         source = (
             normalized.get("source")
             or normalized.get("source_system")

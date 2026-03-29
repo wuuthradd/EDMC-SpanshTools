@@ -71,13 +71,31 @@ def make_spinbox_validator(
     allow_float=False,
     maximum_decimals=2,
     signed=False,
-    safe_float=float,
+    safe_float=None,
 ):
+    def _coerce_numeric(value):
+        if safe_float is None:
+            return float(value)
+        try:
+            return safe_float(value, None)
+        except TypeError:
+            return safe_float(value)
+
     try:
-        maximum = safe_float(widget.cget("to"), None)
+        minimum = _coerce_numeric(widget.cget("from"))
+        maximum = _coerce_numeric(widget.cget("to"))
     except Exception:
+        minimum = None
         maximum = None
-    max_digits = len(str(abs(int(maximum)))) if maximum is not None else None
+    digit_bound = None
+    if minimum is not None or maximum is not None:
+        magnitudes = []
+        if minimum is not None:
+            magnitudes.append(abs(int(minimum)))
+        if maximum is not None:
+            magnitudes.append(abs(int(maximum)))
+        digit_bound = max(magnitudes) if magnitudes else None
+    max_digits = len(str(digit_bound)) if digit_bound is not None else None
     return (
         widget.register(
             lambda proposed: validate_spinbox_input(

@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import SpanshTools.core as spans_mod
 import SpanshTools.plotters as plotters_mod
 import SpanshTools.route_io as route_io_mod
+from SpanshTools.widgets import make_spinbox_validator
 from SpanshTools.core import SpanshTools
 from conftest import DummyFrame, DummyWidget, create_router
 
@@ -193,6 +194,40 @@ def test_linux_clipboard_prefers_flatpak_host_binary(monkeypatch, router):
 
     assert commands[0] == ["/run/host/usr/bin/wl-copy"]
     assert commands[1] == ["/run/host/usr/bin/wl-copy", "--primary"]
+
+
+def test_update_button_label_and_tooltip_reflect_available_update(router):
+    router.spansh_updater = MagicMock(version="1.0.2")
+    router.spansh_updater.is_staged.return_value = False
+
+    assert router._update_button_text() == "Update"
+    assert router._update_button_tooltip_text() == "Version v1.0.2 is available. Click for details."
+
+
+def test_update_button_label_and_tooltip_reflect_staged_update(router):
+    router.spansh_updater = MagicMock(version="1.0.2")
+    router.spansh_updater.is_staged.return_value = True
+
+    assert router._update_button_text() == "Update Ready"
+    assert router._update_button_tooltip_text() == "Update is staged and will install automatically when EDMC closes."
+
+
+def test_show_update_popup_is_noop_when_update_is_already_staged(monkeypatch, router):
+    router.spansh_updater = MagicMock(version="1.0.2")
+    router.spansh_updater.is_staged.return_value = True
+
+    called = False
+
+    def _unexpected_toplevel(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("Update popup should not open for staged updates")
+
+    monkeypatch.setattr(spans_mod.tk, "Toplevel", _unexpected_toplevel)
+
+    router._show_update_popup()
+
+    assert called is False
 
 
 class TestExactPlotterPersistence:
@@ -2344,6 +2379,64 @@ def test_save_plotter_settings_uses_atomic_replace(monkeypatch, router):
 
     assert len(replace_calls) == 1
     assert replace_calls[0][1].endswith("plotter_settings.json")
+
+
+def test_exact_settings_normalization_drops_persisted_is_supercharged(router):
+    normalized = router._normalize_exact_settings_payload({
+        "source": "Sol",
+        "destination": "Achenar",
+        "is_supercharged": True,
+    })
+
+    assert normalized["source"] == "Sol"
+    assert normalized["destination"] == "Achenar"
+    assert "is_supercharged" not in normalized
+
+
+def test_make_spinbox_validator_uses_signed_absolute_bound_digits(router):
+    class FakeSpinbox:
+        def cget(self, key):
+            return {"from": "-16000", "to": "9000"}[key]
+
+        def register(self, func):
+            return func
+
+    validator, _substitute = make_spinbox_validator(FakeSpinbox(), signed=True)
+
+    assert validator("-16000") is True
+    assert validator("-160000") is False
+
+
+def test_json_fleet_params_skip_unresolved_refuel_destination_ids(router):
+    params = router._json_fleet_params(
+        {
+            "parameters": {
+                "source_system": "Sol",
+                "destination_systems": ["123"],
+                "refuel_destinations": ["3"],
+                "capacity": 50000,
+            }
+        },
+        {
+            "source": "Sol",
+            "destinations": ["123"],
+            "jumps": [
+                {"name": "Sol", "distance": 0, "distance_to_destination": 20},
+                {"name": "Carang Hut", "distance": 10, "distance_to_destination": 10},
+                {"name": "A Bootis", "distance": 10, "distance_to_destination": 0},
+            ],
+        },
+    )
+
+    assert params["refuel_destinations"] == []
+
+
+def test_storing_plotter_settings_preserves_previous_planners(router):
+    router._store_plotter_settings("Exomastery", {"range": "56"})
+    router._store_plotter_settings("Neutron Plotter", {"range": "61"})
+
+    assert router._settings_for_planner("Exomastery") == {"range": "56"}
+    assert router._settings_for_planner("Neutron Plotter") == {"range": "61"}
 
 
 def test_jump_json_mode_prefers_explicit_fleet_planner(router):

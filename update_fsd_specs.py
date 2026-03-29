@@ -16,8 +16,10 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
 import pathlib
 import sys
+import tempfile
 
 import requests
 
@@ -37,6 +39,25 @@ def _load_fsd_data_module():
 
 
 fsd_data = _load_fsd_data_module()
+
+
+def _atomic_write_text(path, text):
+    fd, temp_path = tempfile.mkstemp(
+        prefix=".fsd_specs.",
+        suffix=".tmp",
+        dir=str(path.parent),
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(temp_path, path)
+    finally:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except Exception:
+            pass
 
 
 def _infer_supercharge_multiplier(symbol_lower):
@@ -93,7 +114,7 @@ def _parse_coriolis_list(fsd_list):
             continue
 
         try:
-            specs[key] = {
+            candidate = {
                 "class": int(fsd_class),
                 "rating": str(rating).strip().upper(),
                 "optimal_mass": float(entry.get("optmass", 0)),
@@ -102,6 +123,9 @@ def _parse_coriolis_list(fsd_list):
                 "fuel_multiplier": float(entry.get("fuelmul", 0)),
                 "supercharge_multiplier": _infer_supercharge_multiplier(key),
             }
+            normalized = fsd_data.normalize_specs_map({key: candidate})
+            if key in normalized:
+                specs[key] = normalized[key]
         except (TypeError, ValueError):
             continue
 
@@ -197,7 +221,8 @@ def main(argv=None):
             sync_existing=args.sync_existing,
         )
         path = pathlib.Path(fsd_data.bundled_data_file_path())
-        path.write_text(
+        _atomic_write_text(
+            path,
             json.dumps(
                 {
                     "version": current_version + 1,
@@ -206,7 +231,6 @@ def main(argv=None):
                 indent=2,
                 sort_keys=True,
             ) + "\n",
-            encoding="utf-8",
         )
         wrote_path = fsd_data.bundled_data_file_path()
 

@@ -196,6 +196,61 @@ class TestOverlayUpdate:
         router.overlay.send_raw.assert_any_call({"id": FUEL_OVERLAY_ID, "ttl": 0})
         router.overlay.send_raw.assert_any_call({"id": NEUTRON_OVERLAY_ID, "ttl": 0})
 
+    def test_route_complete_overlay_is_not_cleared_by_repeat_refresh(self, router):
+        router.overlay = MagicMock()
+        router.exact_plotter = True
+        router.overlay_var.set(True)
+        router.route = [["Sol", "0"], ["Achenar", "1"]]
+        router.route_done = [True, True]
+        router.jumps_left = 0
+        router._overlay_route_complete_announced = False
+
+        router._update_overlay()
+        first_send_count = router.overlay.send_message.call_count
+        first_clear_count = router.overlay.send_raw.call_count
+
+        router._update_overlay()
+
+        assert router.overlay.send_message.call_count == first_send_count
+        assert router.overlay.send_raw.call_count == first_clear_count
+
+    def test_route_complete_overlay_can_appear_after_re_enabling_fuel_overlay(self, router):
+        router.overlay = MagicMock()
+        router.exact_plotter = True
+        router.overlay_var.set(False)
+        router.route = [["Sol", "0"], ["Achenar", "1"]]
+        router.route_done = [True, True]
+        router.jumps_left = 0
+
+        router._update_overlay()
+        assert router._overlay_route_complete_announced is False
+
+        router.overlay_var.set(True)
+        router._update_overlay()
+
+        router.overlay.send_message.assert_called_once()
+
+    def test_overlay_collision_clamps_neutron_y_to_zero(self, router):
+        router.overlay = MagicMock()
+        router.exact_plotter = True
+        router.overlay_var.set(True)
+        router.neutron_overlay_var.set(True)
+        router.overlay_y_var.set(0)
+        router.neutron_y_var.set(0)
+        router.route = [["Sol", "0", "0", "0"], ["PSR J0000", "1", "10", "0"]]
+        router.exact_route_data = [
+            {"name": "Sol", "distance": 0, "distance_to_destination": 10, "fuel_in_tank": 32, "fuel_used": 0, "must_refuel": False, "has_neutron": False},
+            {"name": "PSR J0000", "distance": 10, "distance_to_destination": 0, "fuel_in_tank": 30, "fuel_used": 2, "must_refuel": True, "has_neutron": True},
+        ]
+        router.offset = 1
+        router.jumps_left = 1
+        router._set_current_location(coords=[0, 0, 0], system="PSR J0000")
+
+        router._update_overlay()
+
+        neutron_call = next(call for call in router.overlay.send_message.call_args_list if call.args[0] == NEUTRON_OVERLAY_ID)
+        assert neutron_call.args[4] == 0
+
     def test_hides_neutron_overlay_when_live_supercharge_state_is_known(self, router):
         router.current_plotter_name = "Neutron Plotter"
         router.overlay = MagicMock()
