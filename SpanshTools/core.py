@@ -237,14 +237,14 @@ class SpanshTools(OverlayMixin, PlottersMixin, SearchToolsMixin, ShipModulingMix
         self.frame.after(2000, _ship_change_poll)
 
         self.title_frame = tk.Frame(self.frame)
-        self.title_frame.columnconfigure(0, weight=1, minsize=40)
+        self.title_frame.columnconfigure(0, weight=1)
         self.title_frame.columnconfigure(1, weight=0)
-        self.title_frame.columnconfigure(2, weight=1, minsize=40)
+        self.title_frame.columnconfigure(2, weight=1)
 
         self._all_collapsed = bool(config.get_int('spansh_all_collapsed', default=0))
         self._all_collapse_btn = tk.Button(
             self.title_frame,
-            text="⏵" if self._all_collapsed else "⏷",
+            text="\u23F5" if self._all_collapsed else "\u23F7",
             font=("", 8),
             width=2,
             padx=1,
@@ -461,6 +461,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, SearchToolsMixin, ShipModulingMix
         return self.route_type == "neutron"
 
     def _update_button_text(self):
+        if getattr(self, "_all_collapsed", False):
+            return "\u26A0"
         if self.has_staged_update():
             return "Update Ready"
         if self._staging_update:
@@ -764,8 +766,9 @@ class SpanshTools(OverlayMixin, PlottersMixin, SearchToolsMixin, ShipModulingMix
         self._all_collapsed = not self._all_collapsed
         try: config.set('spansh_all_collapsed', int(self._all_collapsed))
         except Exception: logger.debug("Failed to save collapse state", exc_info=True)
-        self._all_collapse_btn.config(text="⏵" if self._all_collapsed else "⏷")
+        self._all_collapse_btn.config(text="\u23F5" if self._all_collapsed else "\u23F7")
         self._all_collapse_tooltip.text = "Expand All" if self._all_collapsed else "Collapse All"
+        self._refresh_update_button_appearance()
         self._capture_host_resize_anchor()
         self.show_route_gui(len(self.route) > 0)
         self._schedule_main_window_resize(shrink_current=self._all_collapsed, preserve_position=True)
@@ -2747,7 +2750,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, SearchToolsMixin, ShipModulingMix
     def _show_update_button(self):
         self._refresh_update_button_appearance()
         if not self._update_btn_visible:
-            self.update_btn.grid(row=0, column=2, sticky=tk.E)
+            self.update_btn.place(relx=1.0, rely=0.5, anchor=tk.E)
             self._update_btn_visible = True
 
     def _show_update_popup(self):
@@ -2771,7 +2774,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, SearchToolsMixin, ShipModulingMix
             tk.Label(win, text="Changelog:", font=("", 9, "bold"), anchor=tk.W).pack(
                 padx=10, pady=(10, 2), fill=tk.X)
             changelog_text = tk.Text(win, wrap=tk.WORD, height=10, width=45, font=("", 9))
-            changelog_text.insert(tk.END, self.spansh_updater.changelog)
+            changelog_text.insert(tk.END, self.spansh_updater.changelog.replace("\r", ""))
             changelog_text.config(state=tk.DISABLED)
             changelog_text.pack(padx=10, pady=2)
 
