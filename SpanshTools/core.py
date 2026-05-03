@@ -10,7 +10,7 @@ from tkinter import ttk
 import tkinter.messagebox as confirmDialog
 import threading
 
-import requests
+from .web_utils import WebUtils
 from config import config
 from monitor import monitor
 
@@ -21,25 +21,25 @@ from .constants import (
 )
 from .overlay import OverlayMixin
 from .plotters import PlottersMixin
+from .search_tools import SearchToolsMixin
 from .route_io import RouteIOMixin
 from .route_viewer import CsvViewerWindow
 from .widgets import (
     Tooltip,
-    bind_live_spinbox_clamp,
-    clamp_numeric_input,
     clamp_spinbox_input,
-    live_clamp_spinbox_input,
-    make_spinbox_validator,
-    validate_decimal_input,
-    validate_integer_input,
-    validate_spinbox_input,
+    setup_spinbox,
 )
 
 from .updater import SpanshUpdater
+from .ship_moduling import ShipModulingMixin
 
-class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
+class SpanshTools(OverlayMixin, PlottersMixin, SearchToolsMixin, ShipModulingMixin, RouteIOMixin):
+    """Main plugin controller — owns route state, GUI, overlays, and journal event handling."""
+
     # -- Route type properties (backed by self.route_type) --
     # These keep the public boolean API while delegating to a single string.
+
+    # --- Route Type Properties ---
 
     def _is_route_type(self, route_type):
         return self.route_type == route_type
@@ -59,14 +59,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self._set_route_type_flag("exact", value)
 
     @property
-    def galaxy(self):
-        return self._is_route_type("galaxy")
-
-    @galaxy.setter
-    def galaxy(self, value):
-        self._set_route_type_flag("galaxy", value)
-
-    @property
     def fleetcarrier(self):
         return self._is_route_type("fleet_carrier")
 
@@ -82,9 +74,12 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
     def exploration_plotter(self, value):
         self._set_route_type_flag("exploration", value)
 
+
+    # --- Initialization ---
+
     def __init__(self, plugin_dir):
         version_file = os.path.join(plugin_dir, "version.json")
-        with open(version_file, 'r') as version_fd:
+        with open(version_file, 'r', encoding='utf-8') as version_fd:
             self.plugin_version = json.load(version_fd).get("version", "0.0.0")
 
         self.update_available = False
@@ -98,9 +93,11 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 plugin_dir,
             )
             self.update_available = True
-        self.route_type = None  # "exact", "galaxy", "fleet_carrier", "exploration", "neutron", "simple", or None
+        self.route_type = None  # "exact", "fleet_carrier", "exploration", "neutron", "simple", or None
         self.exploration_mode = None
+        self.exploration_body_types = []
         self.exploration_route_data = []
+        self.neutron_route_data = []
         self.next_stop = "No route planned"
         self.route = []
         self.route_rows = []
@@ -110,49 +107,45 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self.route_done = []
         self.next_wp_label = "Next waypoint: "
         self.jumpcountlbl_txt = "Estimated jumps left: "
-        self.bodieslbl_txt = "Bodies to scan at: "
         self.fleetstocklbl_txt = "Time to stock Tritium"
         self.refuellbl_txt = "Time to scoop some fuel"
-        self.bodies = ""
         self.parent = None
         self.plugin_dir = plugin_dir
-        self.save_route_path = os.path.join(plugin_dir, 'route.csv')
-        self.offset_file_path = os.path.join(plugin_dir, 'offset')
-        self.route_state_filename = 'route_state.json'
-        self.exact_settings_path = os.path.join(plugin_dir, 'exact_settings.json')
-        self.plotter_settings_path = os.path.join(plugin_dir, 'plotter_settings.json')
+        self.route_state_filename = os.path.join('SpanshTools', 'data', 'route_state.json')
+        self.plotter_settings_path = os.path.join(plugin_dir, 'SpanshTools', 'data', 'plotter_settings.json')
+        self.ship_list_path = os.path.join(plugin_dir, 'SpanshTools', 'data', 'ship_list.json')
+        self._ship_list = self._load_ship_list()
         self.offset = 0
         self.jumps_left = 0
         self.error_txt = tk.StringVar()
         self.plot_error = "Error while trying to plot a route, please try again."
-        self.system_header = "System Name"
-        self.bodyname_header = "Body Name"
-        self.bodysubtype_header = "Body Subtype"
-        self.jumps_header = "Jumps"
-        self.restocktritium_header = "Restock Tritium"
-        self.refuel_header = "Refuel"
         self.pleaserefuel = False
-        # distance tracking
         self.dist_next = ""
         self.dist_prev = ""
         self.dist_remaining = ""
-        # Supercharge mode (Spansh neutron routing)
+        self._first_wp_distances = ()
         self.supercharge_multiplier = tk.IntVar(value=4)
 
-        # Plotter state
         self.current_plotter_name = None
         self.current_coords = None          # [x, y, z] from FSDJump/Location StarPos
         self.current_system = None          # system name from last FSDJump/Location
         self.current_fuel_main = None       # live main tank fuel from Status.json/dashboard_entry
         self.current_fuel_reservoir = None  # live reservoir fuel from Status.json/dashboard_entry
         self.ship_fsd_data = None           # dict with FSD params for exact plotter
+        self.current_ship_loadout = None    # current ship full loadout payload from EDMC
+        self._exact_imported_ship_loadout = None
+        self._exact_imported_ship_fsd_data = None
+        self._exact_ship_import_win = None
+        self._exact_ship_export_win = None
         self.exact_route_data = []          # full API response per waypoint (fuel info)
         self.fleet_carrier_data = []        # full API response per carrier waypoint
-        self._exact_settings = None         # saved exact plotter window settings
+        self._pending_exact_settings = None
         self._plotter_settings = {}
         self._exact_plot_cancelled = False  # cancel flag for exact plotter worker
         self._plot_cancelled = False        # cancel flag for neutron plotter worker
         self._plotting = False              # True while any plotter is computing
+        self._range_prefill_ready = False   # True after first range prefill delay has elapsed
+        self._cargo_prefill_ready = False   # True after first cargo prefill delay has elapsed
         self._plot_token = 0
         self._plot_state_lock = threading.RLock()
         self._current_location_lock = threading.RLock()
@@ -167,22 +160,20 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self._host_resize_anchor_x = None
         self._host_resize_anchor_y = None
         self._host_base_req_width = None
-        self._host_base_extra_width = None
-        self._host_base_extra_height = None
         self._clipboard_error_reported = False
         self._staging_update = False
-        self.exact_win = None               # exact plotter Toplevel window
         self._last_source_system = None     # last known system for pre-filling plotter
         self.is_supercharged = False        # True after JetConeBoost, reset on FSDJump
         self._supercharge_state_known = False
         self._overlay_route_complete_announced = False
         self._plotter_window_kind = None
         self.csv_viewer_win = None
+        self.csv_viewer = CsvViewerWindow(self)
         self._csv_viewer_signature = None
         self._csv_viewer_runtime = None
-        self._csv_viewer_width_cache = {}
         self._pending_journal_event = None
         self._pending_dashboard_event = None
+        self._saw_live_journal_event = False
         self._static_layout_width_cache = {}
         self._route_button_width_cache_key = None
         self._route_button_width_chars = 24
@@ -195,7 +186,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         except Exception:
             self._csv_viewer_dark_mode = False
 
-        # Overlay support
         self.overlay = None
         try:
             from EDMCOverlay import edmcoverlay
@@ -207,16 +197,68 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             except ImportError:
                 self.overlay = None
 
-    #   -- GUI part --
+
+    # --- GUI Initialization ---
+
     def init_gui(self, parent):
+        """Build all plugin widgets, wire event bindings, and start background polling timers."""
         self.parent = parent
         self.frame = tk.Frame(parent, borderwidth=2)
         self.frame.grid(sticky=tk.NSEW, columnspan=2)
+        def _on_range_ready():
+            self._range_prefill_ready = True
+            self._cargo_prefill_ready = True
+            if getattr(self, 'range_entry', None) and self.range_entry.winfo_exists():
+                self._prefill_range_entry(self.range_entry, overwrite=False, planner="Neutron Plotter")
+            if getattr(self, '_exp_range', None) and self._exp_range.winfo_exists():
+                self._prefill_range_entry(self._exp_range, overwrite=False, planner=self.current_plotter_name)
+            if getattr(self, 'exact_cargo_entry', None) and self.exact_cargo_entry.winfo_exists():
+                self._prefill_cargo_entry(self.exact_cargo_entry, overwrite=False)
+        self.frame.after(6000, _on_range_ready)
 
-        # Title row — label centered, update button anchored right
+        self._ship_poll_count = 0
+        def _ship_change_poll():
+            try:
+                ship_id = monitor.state.get("ShipID")
+                cmdr = getattr(self, "current_commander", "") or str(getattr(monitor, "cmdr", "") or monitor.state.get("Commander", "") or "").strip()
+                if ship_id is not None and cmdr and ship_id != getattr(self, "_dashboard_last_ship_id", None):
+                    loadout = monitor.ship()
+                    if loadout and loadout.get("ShipID") == ship_id:
+                        self._dashboard_last_ship_id = ship_id
+                        self.process_loadout(loadout)
+            except Exception:
+                pass
+            self._ship_poll_count += 1
+            interval = 1000 if self._ship_poll_count < 15 else 3000
+            try:
+                self.frame.after(interval, _ship_change_poll)
+            except Exception:
+                pass
+        self.frame.after(2000, _ship_change_poll)
+
         self.title_frame = tk.Frame(self.frame)
+        self.title_frame.columnconfigure(0, weight=1, minsize=40)
+        self.title_frame.columnconfigure(1, weight=0)
+        self.title_frame.columnconfigure(2, weight=1, minsize=40)
+
+        self._all_collapsed = bool(config.get_int('spansh_all_collapsed', default=0))
+        self._all_collapse_btn = tk.Button(
+            self.title_frame,
+            text="⏵" if self._all_collapsed else "⏷",
+            font=("", 8),
+            width=2,
+            padx=1,
+            pady=0,
+            bd=1,
+            relief=tk.GROOVE,
+            cursor="hand2",
+            command=self._toggle_collapse_all,
+        )
+        self._all_collapse_btn.grid(row=0, column=0, sticky=tk.W)
+        self._all_collapse_tooltip = Tooltip(self._all_collapse_btn, "Expand All" if self._all_collapsed else "Collapse All")
+
         self.title_lbl = tk.Label(self.title_frame, text=f"Spansh Tools v{self.plugin_version.strip()}", font=("", 10, "bold"))
-        self.title_lbl.pack()
+        self.title_lbl.grid(row=0, column=1)
         self.update_btn = tk.Button(
             self.title_frame,
             text="Update",
@@ -227,29 +269,30 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             activebackground="#E7B84D",
             relief=tk.GROOVE,
             bd=1,
-            padx=4,
+            padx=6,
             pady=0,
             cursor="hand2",
             command=self._show_update_popup,
         )
         self._update_btn_tooltip = Tooltip(self.update_btn, self._update_button_tooltip_text())
-        # Hidden by default — shown when update is available
         self._update_btn_visible = False
         if self.update_available:
             self._show_update_button()
 
-        # Route info
-        self.waypoint_prev_btn = tk.Button(self.frame, text="^", command=self.goto_prev_waypoint, width=3)
-        self.waypoint_btn = tk.Button(self.frame, text=self.next_wp_label + '\n' + self.next_stop, command=self.copy_waypoint, width=24)
-        self.waypoint_next_btn = tk.Button(self.frame, text="v", command=self.goto_next_waypoint, width=3)
+        # Route info — contained in a sub-frame so buttons don't shift with label text
+        self._waypoint_frame = tk.Frame(self.frame)
+        self._waypoint_frame.columnconfigure(0, weight=0)
+        self._waypoint_frame.columnconfigure(1, weight=1)
+        self.waypoint_prev_btn = tk.Button(self._waypoint_frame, text="^", command=self.goto_prev_waypoint, width=3)
+        self.waypoint_btn = tk.Button(self._waypoint_frame, text=self.next_wp_label + '\n' + self.next_stop, command=self.copy_waypoint, width=24)
+        self.waypoint_next_btn = tk.Button(self._waypoint_frame, text="v", command=self.goto_next_waypoint, width=3)
         self.jumpcounttxt_lbl = tk.Label(self.frame, text=self.jumpcountlbl_txt + str(self.jumps_left))
-        self.dist_prev_lbl = tk.Label(self.frame, text="")
-        self.dist_next_lbl = tk.Label(self.frame, text="")
-        self.dist_remaining_lbl = tk.Label(self.frame, text="")
-        self.bodies_lbl = tk.Label(self.frame, justify=tk.LEFT, text=self.bodieslbl_txt + self.bodies)
+        self.dist_prev_lbl = tk.Label(self._waypoint_frame, text="", anchor=tk.W)
+        self.dist_next_lbl = tk.Label(self._waypoint_frame, text="", anchor=tk.W)
+        self.dist_remaining_lbl = tk.Label(self._waypoint_frame, text="", anchor=tk.W)
+        self.bodies_lbl = tk.Frame(self.frame)  # placeholder widget (grid row reserved for future use)
         self.fleetrestock_lbl = tk.Label(self.frame, justify=tk.CENTER, text=self.fleetstocklbl_txt)
 
-        # Collapse/expand toggle for the controls section
         self._controls_collapsed = bool(config.get_int('spansh_controls_collapsed', default=0))
         self._collapse_btn = tk.Button(
             self.frame,
@@ -263,14 +306,12 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             cursor="hand2",
             command=self._toggle_collapse,
         )
-        self._collapse_tooltip = Tooltip(self._collapse_btn, "Expand" if self._controls_collapsed else "Collapse")
+        self._collapse_tooltip = Tooltip(self._collapse_btn, "Expand Control" if self._controls_collapsed else "Collapse Control")
         self.refuel_lbl = tk.Label(self.frame, justify=tk.LEFT, text=self.refuellbl_txt)
         self.error_lbl = tk.Label(self.frame, textvariable=self.error_txt)
 
-        # Plotter window reference (created on demand)
         self.plotter_win = None
 
-        # Button frame — isolates button columns from waypoint layout
         self.btn_frame = tk.Frame(self.frame)
         self.btn_frame.columnconfigure(0, weight=1, uniform="top_controls")
         self.btn_frame.columnconfigure(1, weight=1, uniform="top_controls")
@@ -292,7 +333,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             )
         ) + 1
 
-        # Route planner dropdown
         saved_planner_name = ""
         try:
             saved_planner_name = config.get_str('spansh_route_planner_name')
@@ -319,10 +359,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         )
 
         self.csv_route_btn = tk.Button(self.btn_frame, text="Import file", width=self._compact_button_width, command=self.plot_file)
-        # Overlay controls — grid layout: 2 columns, 2 rows
         self.overlay_cb_frame = tk.Frame(self.frame)
 
-        # Row 0: checkboxes
         self.overlay_var = tk.BooleanVar(value=False)
         self.overlay_cb = tk.Checkbutton(self.overlay_cb_frame, text="Fuel Overlay", variable=self.overlay_var, command=self.toggle_overlay)
         self.overlay_cb.grid(row=0, column=0, sticky=tk.W)
@@ -330,37 +368,31 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self.neutron_overlay_cb = tk.Checkbutton(self.overlay_cb_frame, text="Supercharge Overlay", variable=self.neutron_overlay_var, command=self.toggle_neutron_overlay)
         self.neutron_overlay_cb.grid(row=0, column=1, sticky=tk.W, padx=(15, 0))
 
-        # Row 1: fuel position controls
         self.overlay_pos_frame = tk.Frame(self.overlay_cb_frame)
         self.overlay_pos_frame.grid(row=1, column=0, sticky=tk.W)
         self.overlay_x_var = tk.IntVar(value=590)
         tk.Label(self.overlay_pos_frame, text="X:").pack(side=tk.LEFT)
-        self.overlay_x_spin = tk.Spinbox(self.overlay_pos_frame, from_=0, to=1280, width=5, textvariable=self.overlay_x_var,
-                                         validate="key")
-        self.overlay_x_spin.configure(validatecommand=self._spinbox_validator(self.overlay_x_spin))
+        self.overlay_x_spin = tk.Spinbox(self.overlay_pos_frame, from_=0, to=1280, width=5, textvariable=self.overlay_x_var)
+        self._setup_spinbox(self.overlay_x_spin, integer=True)
         self.overlay_x_spin.pack(side=tk.LEFT, padx=(0, 5))
         self.overlay_y_var = tk.IntVar(value=675)
         tk.Label(self.overlay_pos_frame, text="Y:").pack(side=tk.LEFT)
-        self.overlay_y_spin = tk.Spinbox(self.overlay_pos_frame, from_=0, to=960, width=5, textvariable=self.overlay_y_var,
-                                         validate="key")
-        self.overlay_y_spin.configure(validatecommand=self._spinbox_validator(self.overlay_y_spin))
+        self.overlay_y_spin = tk.Spinbox(self.overlay_pos_frame, from_=0, to=960, width=5, textvariable=self.overlay_y_var)
+        self._setup_spinbox(self.overlay_y_spin, integer=True)
         self.overlay_y_spin.pack(side=tk.LEFT)
         self.overlay_pos_frame.grid_remove()
 
-        # Row 1: supercharge position controls
         self.neutron_pos_frame = tk.Frame(self.overlay_cb_frame)
         self.neutron_pos_frame.grid(row=1, column=1, sticky=tk.W, padx=(15, 0))
         self.neutron_x_var = tk.IntVar(value=600)
         tk.Label(self.neutron_pos_frame, text="X:").pack(side=tk.LEFT)
-        self.neutron_x_spin = tk.Spinbox(self.neutron_pos_frame, from_=0, to=1280, width=5, textvariable=self.neutron_x_var,
-                                         validate="key")
-        self.neutron_x_spin.configure(validatecommand=self._spinbox_validator(self.neutron_x_spin))
+        self.neutron_x_spin = tk.Spinbox(self.neutron_pos_frame, from_=0, to=1280, width=5, textvariable=self.neutron_x_var)
+        self._setup_spinbox(self.neutron_x_spin, integer=True)
         self.neutron_x_spin.pack(side=tk.LEFT, padx=(0, 5))
         self.neutron_y_var = tk.IntVar(value=675)
         tk.Label(self.neutron_pos_frame, text="Y:").pack(side=tk.LEFT)
-        self.neutron_y_spin = tk.Spinbox(self.neutron_pos_frame, from_=0, to=960, width=5, textvariable=self.neutron_y_var,
-                                         validate="key")
-        self.neutron_y_spin.configure(validatecommand=self._spinbox_validator(self.neutron_y_spin))
+        self.neutron_y_spin = tk.Spinbox(self.neutron_pos_frame, from_=0, to=960, width=5, textvariable=self.neutron_y_var)
+        self._setup_spinbox(self.neutron_y_spin, integer=True)
         self.neutron_y_spin.pack(side=tk.LEFT)
         self.neutron_pos_frame.grid_remove()
 
@@ -375,7 +407,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self.clear_route_btn = tk.Button(self.btn_frame, text="Clear route", command=self.clear_route)
         self.show_csv_btn = tk.Button(self.btn_frame, text="Show route", command=self.show_csv_viewer)
 
-        # Configure column weights for centered layout
         self.frame.columnconfigure(0, weight=1)
         self.frame.columnconfigure(1, weight=1)
         self.frame.columnconfigure(2, weight=1)
@@ -383,16 +414,15 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         row = 0
         self.title_frame.grid(row=row, column=0, columnspan=3, pady=(5, 2), sticky=tk.EW)
         row += 1
-        self.waypoint_prev_btn.grid(row=row, column=0, columnspan=2, padx=5, pady=10)
-        self.dist_remaining_lbl.grid(row=row, column=2, padx=5, pady=10, sticky=tk.W)
+        self._waypoint_frame.grid(row=row, column=0, columnspan=3, sticky=tk.EW, padx=5)
+        self.waypoint_prev_btn.grid(row=0, column=0, pady=10)
+        self.dist_remaining_lbl.grid(row=0, column=1, padx=5, pady=10, sticky=tk.W)
+        self.waypoint_btn.grid(row=1, column=0, pady=10)
+        self.dist_prev_lbl.grid(row=1, column=1, padx=5, pady=10, sticky=tk.W)
+        self.waypoint_next_btn.grid(row=2, column=0, pady=10)
+        self.dist_next_lbl.grid(row=2, column=1, padx=5, pady=10, sticky=tk.W)
         row += 1
-        self.waypoint_btn.grid(row=row, column=0, columnspan=2, padx=5, pady=10)
-        self.dist_prev_lbl.grid(row=row, column=2, padx=5, pady=10, sticky=tk.W)
-        row += 1
-        self.waypoint_next_btn.grid(row=row, column=0, columnspan=2, padx=5, pady=10)
-        self.dist_next_lbl.grid(row=row, column=2, padx=5, pady=10, sticky=tk.W)
-        row += 1
-        self._collapse_btn.grid(row=row, column=0, sticky=tk.W, padx=5, pady=(2, 0))
+        self._collapse_btn.grid(row=row, column=0, sticky=tk.W, padx=2, pady=(2, 0))
         row += 1
         self.bodies_lbl.grid(row=row, columnspan=3, sticky=tk.EW)
         row += 1
@@ -400,10 +430,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         row += 1
         self.refuel_lbl.grid(row=row, columnspan=3, sticky=tk.EW)
         row += 1
-        # Button frame
-        self.btn_frame.grid(row=row, column=0, columnspan=3, sticky=tk.EW, padx=5)
+        self.btn_frame.grid(row=row, column=0, columnspan=3, sticky=tk.EW)
         row += 1
-        # Route view: Overlay controls (fuel + supercharge columns)
         self.overlay_cb_frame.grid(row=row, column=0, columnspan=3, pady=(5, 5), sticky=tk.EW, padx=5)
         self.overlay_cb_frame.columnconfigure(0, weight=1)
         self.overlay_cb_frame.columnconfigure(1, weight=1)
@@ -415,9 +443,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self.error_lbl.grid_remove()
         row += 1
 
-        # Restore settings
         self._load_overlay_settings()
-        self._load_exact_settings()
         self._load_plotter_settings()
 
         self.update_gui()
@@ -426,8 +452,9 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
 
         return self.frame
 
+    # --- GUI State Helpers ---
+
     def set_source_ac(self, text):
-        """Store current system for pre-filling plotter windows."""
         self._last_source_system = text
 
     def _is_neutron_route_active(self):
@@ -486,6 +513,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         if pending_dashboard:
             self._handle_dashboard_entry_ui(pending_dashboard)
         if pending_journal:
+            self._saw_live_journal_event = True
             system, entry, state = pending_journal
             self._handle_journal_entry_ui(system, entry, state)
 
@@ -493,6 +521,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         if key not in self._static_layout_width_cache:
             self._static_layout_width_cache[key] = factory()
         return self._static_layout_width_cache[key]
+
+    # --- Layout & Control Management ---
 
     def _no_route_top_width(self):
         return self._cached_static_layout_width(
@@ -550,7 +580,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self.plot_btn.grid(row=0, column=1, pady=2, padx=2, sticky=tk.EW)
         self.search_dropdown.grid(row=1, column=0, pady=2, padx=2, sticky=tk.EW)
         self.search_btn.grid(row=1, column=1, pady=2, padx=2, sticky=tk.EW)
-        self.csv_route_btn.grid(row=2, column=0, columnspan=2, pady=2, padx=2, sticky="")
+        self.csv_route_btn.grid(row=2, column=0, columnspan=2, pady=2, padx=2, sticky=tk.EW)
 
     def _layout_route_controls(self):
         self.btn_frame.grid()
@@ -568,15 +598,19 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
 
     def _update_route_widget_text(self, route_complete):
         self.waypoint_btn.config(width=self._route_button_width_chars_for_current_route())
-        waypoint_text = "Route Complete!" if route_complete else self.next_stop
-        self.waypoint_btn["text"] = self.next_wp_label + '\n' + waypoint_text
-        if not route_complete:
-            self.jumpcounttxt_lbl["text"] = self.jumpcountlbl_txt + str(self.jumps_left)
+        self.waypoint_btn["text"] = self.next_wp_label + '\n' + self.next_stop
+        self.jumpcounttxt_lbl["text"] = "Route Complete!" if route_complete else self.jumpcountlbl_txt + str(self.jumps_left)
+        is_last_waypoint = self.offset >= len(self.route) - 1 if self.route else False
+        if is_last_waypoint:
+            self.dist_remaining_lbl["text"] = "Final Destination"
+            self.dist_prev_lbl["text"] = self.dist_prev
+            self.dist_next_lbl["text"] = ""
+        else:
+            self.dist_remaining_lbl["text"] = self.dist_remaining
             self.dist_prev_lbl["text"] = self.dist_prev
             self.dist_next_lbl["text"] = self.dist_next
-            self.dist_remaining_lbl["text"] = self.dist_remaining
-        else:
-            self.jumpcounttxt_lbl["text"] = "Route complete!"
+
+    # --- Route GUI Display & Collapse ---
 
     def _show_route_overlay_controls(self):
         if self.exact_plotter:
@@ -611,6 +645,22 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
     def show_route_gui(self, show):
         self.hide_error()
         has_route = show and len(self.route) > 0
+
+        all_widgets = [
+            self._waypoint_frame,
+            self.waypoint_prev_btn, self.waypoint_btn, self.waypoint_next_btn,
+            self.jumpcounttxt_lbl, self.dist_prev_lbl, self.dist_next_lbl,
+            self.dist_remaining_lbl, self.bodies_lbl, self.fleetrestock_lbl,
+            self.refuel_lbl, self.btn_frame, self.overlay_cb_frame,
+            self.error_lbl, self._collapse_btn
+        ]
+
+        if self._all_collapsed:
+            for w in all_widgets: w.grid_remove()
+            self._update_main_panel_widths()
+            self._route_layout_shown = False
+            return
+
         prev_layout = getattr(self, "_route_layout_shown", None)
         layout_changed = prev_layout != has_route
         self._route_layout_shown = has_route
@@ -618,7 +668,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             self._capture_host_resize_anchor()
 
         if not has_route:
-            # Hide route view elements
+            self._waypoint_frame.grid_remove()
             self._collapse_btn.grid_remove()
             self.waypoint_prev_btn.grid_remove()
             self.waypoint_btn.grid_remove()
@@ -631,7 +681,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             self.dist_prev_lbl.grid_remove()
             self.dist_next_lbl.grid_remove()
             self.dist_remaining_lbl.grid_remove()
-            # Hide route-only buttons
             self.clear_route_btn.grid_remove()
             self.show_csv_btn.grid_remove()
             # Ensure btn_frame is visible (may have been hidden by collapse)
@@ -651,18 +700,13 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             route_complete = self._route_complete_for_ui()
             self._update_route_widget_text(route_complete)
 
-            # Always-visible widgets (waypoint nav + distances)
+            self._waypoint_frame.grid()
             self.waypoint_prev_btn.grid()
             self.waypoint_btn.grid()
             self.waypoint_next_btn.grid()
-            if not route_complete:
-                self.dist_prev_lbl.grid()
-                self.dist_next_lbl.grid()
-                self.dist_remaining_lbl.grid()
-            else:
-                self.dist_prev_lbl.grid_remove()
-                self.dist_next_lbl.grid_remove()
-                self.dist_remaining_lbl.grid_remove()
+            self.dist_prev_lbl.grid()
+            self.dist_next_lbl.grid()
+            self.dist_remaining_lbl.grid()
 
             prev_disabled = self.offset == 0
             next_disabled = self.offset == len(self.route) - 1
@@ -673,12 +717,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             self.waypoint_prev_btn.config(state=tk.DISABLED if prev_disabled else tk.NORMAL)
             self.waypoint_next_btn.config(state=tk.DISABLED if next_disabled else tk.NORMAL)
 
-            # Collapsible section — only grid widgets when not collapsed
             if not self._controls_collapsed:
-                if not route_complete:
-                    self.jumpcounttxt_lbl.grid()
-                else:
-                    self.jumpcounttxt_lbl.grid()
+                self.jumpcounttxt_lbl.grid()
 
                 self.bodies_lbl.grid_remove()
 
@@ -696,7 +736,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                         self.fleetrestock_lbl["text"] = "\n".join(fleet_msgs)
                         self.fleetrestock_lbl.grid()
 
-                if self.galaxy or self.exact_plotter:
+                if self.exact_plotter:
                     if self.pleaserefuel:
                         self.refuel_lbl['text'] = self.refuellbl_txt
                         self.refuel_lbl.grid()
@@ -720,38 +760,27 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
     def update_gui(self):
         self.show_route_gui(True)
 
+    def _toggle_collapse_all(self):
+        self._all_collapsed = not self._all_collapsed
+        try: config.set('spansh_all_collapsed', int(self._all_collapsed))
+        except Exception: logger.debug("Failed to save collapse state", exc_info=True)
+        self._all_collapse_btn.config(text="⏵" if self._all_collapsed else "⏷")
+        self._all_collapse_tooltip.text = "Expand All" if self._all_collapsed else "Collapse All"
+        self._capture_host_resize_anchor()
+        self.show_route_gui(len(self.route) > 0)
+        self._schedule_main_window_resize(shrink_current=self._all_collapsed, preserve_position=True)
+
     def _toggle_collapse(self):
         self._controls_collapsed = not self._controls_collapsed
-        try:
-            config.set('spansh_controls_collapsed', int(self._controls_collapsed))
-        except Exception:
-            pass
+        try: config.set('spansh_controls_collapsed', int(self._controls_collapsed))
+        except Exception: logger.debug("Failed to save controls collapse state", exc_info=True)
         self._collapse_btn.config(text="⏵" if self._controls_collapsed else "⏷")
-        self._collapse_tooltip.text = "Expand" if self._controls_collapsed else "Collapse"
+        self._collapse_tooltip.text = "Expand Control" if self._controls_collapsed else "Collapse Control"
         self._capture_host_resize_anchor()
-        self._apply_collapse_state()
-        self._schedule_main_window_resize(
-            shrink_current=self._controls_collapsed,
-            preserve_position=True,
-        )
+        self.show_route_gui(len(self.route) > 0)
+        self._schedule_main_window_resize(shrink_current=self._controls_collapsed, preserve_position=True)
 
-    def _apply_collapse_state(self):
-        """Show or hide the collapsible controls section."""
-        collapsible = [
-            self.bodies_lbl,
-            self.fleetrestock_lbl,
-            self.refuel_lbl,
-            self.btn_frame,
-            self.overlay_cb_frame,
-            self.jumpcounttxt_lbl,
-            self.error_lbl,
-        ]
-        if self._controls_collapsed:
-            for widget in collapsible:
-                widget.grid_remove()
-        else:
-            # Re-run show_route_gui to restore correct visibility
-            self.show_route_gui(True)
+    # --- Route State & Completion ---
 
     def _route_complete_for_ui(self):
         if not self.route:
@@ -764,7 +793,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         planner_name = self._current_route_planner_name()
         arrival_completion_plotters = {
             "Neutron Plotter",
-            "Galaxy Plotter",
+            "Exact Plotter",
             "Road to Riches",
             "Ammonia World Route",
             "Earth-like World Route",
@@ -783,7 +812,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         return self.offset >= len(self.route) - 1
 
     def _on_planner_selected(self, event=None):
-        """Save selected planner to EDMC config."""
         try:
             planner = self.planner_var.get()
             idx = ROUTE_PLANNERS.index(planner)
@@ -795,6 +823,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
     def _reset_exploration_state(self):
         self.exploration_plotter = False
         self.exploration_mode = None
+        self.exploration_body_types = []
         self.exploration_route_data = []
 
     def _route_done_values(self):
@@ -851,37 +880,18 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         except (TypeError, ValueError):
             return default
 
-    def _safe_float(self, value, default=None):
-        parsed = self._parse_number(value)
-        if parsed is None:
-            return default
-        try:
-            return float(parsed)
-        except (TypeError, ValueError):
-            return default
+    # --- Input Parsing & Configuration ---
 
-    def _validate_integer_input(self, proposed, *, signed=False):
-        return validate_integer_input(proposed, signed=signed)
-
-    def _validate_decimal_input(self, proposed, *, maximum_decimals=2):
-        return validate_decimal_input(proposed, maximum_decimals=maximum_decimals)
-
-    def _validate_spinbox_input(self, proposed, *, allow_float=False, maximum_decimals=2, signed=False, max_digits=None):
-        return validate_spinbox_input(
-            proposed,
-            allow_float=allow_float,
-            maximum_decimals=maximum_decimals,
-            signed=signed,
-            max_digits=max_digits,
-        )
-
-    def _spinbox_validator(self, widget, *, allow_float=False, maximum_decimals=2, signed=False):
-        return make_spinbox_validator(
+    def _setup_spinbox(self, widget, *, allow_float=False, maximum_decimals=2, signed=False, integer=False):
+        setup_spinbox(
             widget,
             allow_float=allow_float,
             maximum_decimals=maximum_decimals,
             signed=signed,
+            integer=integer,
             safe_float=self._safe_float,
+            parse_number=self._parse_number,
+            set_entry_value=self._set_entry_value,
         )
 
     def _normalize_supercharge_multiplier(self, value, default=4):
@@ -894,8 +904,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         normalized = str(value or "").strip().lower()
         if normalized in {"squadron", "squadron carrier"}:
             return "squadron"
-        if normalized in {"fleet", "player carrier", "player", ""}:
-            return "fleet"
         return "fleet"
 
     def _fleet_carrier_profile(self, carrier_type):
@@ -951,6 +959,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         except ValueError:
             return None
 
+    # --- Route Data Accessors ---
+
     def _route_raw_row_at(self, index):
         if not (0 <= index < len(self.route)):
             return []
@@ -958,6 +968,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         return row if isinstance(row, (list, tuple)) else []
 
     def _route_rows_signature(self):
+        """FNV-1a hash of route rows and done states — used to detect viewer staleness cheaply."""
         if not self._route_rows_dirty and self._route_rows_signature_cache is not None:
             return self._route_rows_signature_cache
         done_count = 0
@@ -994,17 +1005,14 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         for index in range(len(self.route)):
             raw_row = self._route_raw_row_at(index)
             exact_data = self.exact_route_data[index] if self.exact_plotter and index < len(self.exact_route_data) else {}
-            progress = 1 if self.galaxy else self._safe_int(raw_row[1] if len(raw_row) > 1 else None, 0)
+            progress = self._safe_int(raw_row[1] if len(raw_row) > 1 else None, 0)
             restock_required = len(raw_row) > 4 and str(raw_row[4]).strip().lower() == "yes"
             rows.append({
                 "name": str(raw_row[0] or "") if raw_row else "",
                 "progress": progress if progress is not None else 0,
                 "distance_to_arrival": self._safe_float(raw_row[2] if len(raw_row) > 2 else None, None),
                 "remaining_distance": self._safe_float(raw_row[3] if len(raw_row) > 3 else None, None),
-                "refuel_required": (
-                    (len(raw_row) > 1 and str(raw_row[1]).strip().lower() == "yes")
-                    if self.galaxy else bool(exact_data.get("must_refuel", False))
-                ),
+                "refuel_required": bool(exact_data.get("must_refuel", False)),
                 "has_neutron": (
                     bool(exact_data.get("has_neutron", False))
                     if self.exact_plotter else (
@@ -1118,6 +1126,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             ]
             if matching_indices:
                 return min(matching_indices, key=lambda index: abs(index - anchor_index))
+            return None  # system known but not in route → off-route jump
         return anchor_index if 0 <= anchor_index < len(self.route) else None
 
     def _has_live_location_state(self):
@@ -1131,6 +1140,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             return state.get("StarPos") is not None or bool(state.get("SystemName"))
         except Exception:
             return False
+
+    # --- Waypoint & Fleet Group Management ---
 
     def _mark_waypoint_done(self, index):
         if not (0 <= index < len(self.route)):
@@ -1214,6 +1225,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             return f"{self.fleetstocklbl_txt}: {amount:,}"
         return self.fleetstocklbl_txt
 
+    # --- Formatting & Pixel Measurement ---
+
     def _format_whole_number(self, value, suffix=""):
         parsed = self._parse_number(value)
         if parsed is None:
@@ -1255,10 +1268,19 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             fallback = max((len(str(label)) for label in labels if label), default=0)
             return fallback * 8 + padding
 
+    # --- Main Window Sizing & Geometry ---
+
     def _update_main_panel_widths(self):
+        """Recompute label column widths, lazily including first-waypoint distances to prevent layout shift."""
         try:
             self.frame.update_idletasks()
         except Exception:
+            return
+
+        if self._all_collapsed:
+            self.frame.columnconfigure(0, minsize=130)
+            self.frame.columnconfigure(1, minsize=130)
+            self.frame.columnconfigure(2, minsize=0)
             return
 
         left_group_width = max(
@@ -1272,6 +1294,13 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         )
         left_column_width = max(95, int((left_group_width + 1) / 2))
 
+        if self.route and len(self.route) >= 2 and not self._first_wp_distances:
+            saved = (self.offset, self.dist_prev, self.dist_next, self.dist_remaining)
+            self.offset = 0
+            self.compute_distances()
+            self._first_wp_distances = (self.dist_prev, self.dist_next, self.dist_remaining)
+            self.offset, self.dist_prev, self.dist_next, self.dist_remaining = saved
+
         right_group_width = max(
             160,
             self._text_pixel_width(
@@ -1279,6 +1308,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 getattr(self.dist_prev_lbl, "cget", lambda _k: "")("text"),
                 getattr(self.dist_next_lbl, "cget", lambda _k: "")("text"),
                 getattr(self.dist_remaining_lbl, "cget", lambda _k: "")("text"),
+                *self._first_wp_distances,
                 padding=22,
             ),
         )
@@ -1298,24 +1328,81 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             toplevel = self.frame.winfo_toplevel()
             toplevel.update_idletasks()
             host_req_width = max(1, int(toplevel.winfo_reqwidth()))
-            host_req_height = max(1, int(toplevel.winfo_reqheight()))
             self._host_base_req_width = host_req_width
-            self._host_base_extra_width = 0
-            self._host_base_extra_height = 0
         except Exception:
             self._host_base_req_width = 300
-            self._host_base_extra_width = 0
-            self._host_base_extra_height = 0
+
+    @staticmethod
+    def _parse_geometry(toplevel):
+        """Parse geometry string 'WxH+X+Y' for consistent position on Linux."""
+        try:
+            geo = toplevel.wm_geometry()
+            m = re.match(r'(\d+)x(\d+)\+(-?\d+)\+(-?\d+)', geo)
+            if m:
+                return int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _wm_y_decoration_offset(toplevel):
+        """Return the Y offset the window manager adds to geometry() calls.
+
+        On Linux/X11 some window managers add the title-bar height to
+        the Y coordinate on every ``geometry()`` call that changes the
+        window width.  Feeding the reported Y straight back therefore
+        shifts the window down by that amount each time.
+
+        The offset is measured by making a +1 px width change on the
+        actual toplevel and observing how much Y drifts, then undoing
+        the change.  The result is cached on the widget so the probe
+        only runs once per window.
+        """
+        attr = "_wm_y_deco_offset_cache"
+        cached = getattr(toplevel, attr, None)
+        if cached is not None:
+            return cached
+        try:
+            geo = toplevel.wm_geometry()
+            m = re.match(r'(\d+)x(\d+)\+(-?\d+)\+(-?\d+)', geo)
+            if not m:
+                return 0
+            w, h, x, y_before = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+            # Probe: change width by 1 px and observe Y drift
+            toplevel.geometry(f"{w + 1}x{h}+{x}+{y_before}")
+            toplevel.update_idletasks()
+            m2 = re.match(r'\d+x\d+\+(-?\d+)\+(-?\d+)', toplevel.wm_geometry())
+            if not m2:
+                return 0
+            y_after = int(m2.group(2))
+            offset = y_after - y_before
+            # Undo the probe — restore original size and correct for offset
+            toplevel.geometry(f"{w}x{h}+{x}+{y_before - offset}")
+            toplevel.update_idletasks()
+            offset = max(0, offset)
+            try:
+                setattr(toplevel, attr, offset)
+            except Exception:
+                pass
+            return offset
+        except Exception:
+            return 0
 
     def _capture_host_resize_anchor(self):
-        if self._host_resize_anchor_x is not None and self._host_resize_anchor_y is not None:
-            return
         try:
             if not getattr(self, "frame", None):
                 return
+            if not getattr(self, "_host_window_resize_ready", False):
+                return
             toplevel = self.frame.winfo_toplevel()
-            self._host_resize_anchor_x = int(toplevel.winfo_x())
-            self._host_resize_anchor_y = int(toplevel.winfo_y())
+            y_offset = self._wm_y_decoration_offset(toplevel)
+            parsed = self._parse_geometry(toplevel)
+            if parsed:
+                self._host_resize_anchor_x = parsed[2]
+                self._host_resize_anchor_y = parsed[3] - y_offset
+            else:
+                self._host_resize_anchor_x = int(toplevel.winfo_x())
+                self._host_resize_anchor_y = int(toplevel.winfo_y()) - y_offset
         except Exception:
             self._host_resize_anchor_x = None
             self._host_resize_anchor_y = None
@@ -1364,10 +1451,16 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 pass
             target_width = max(300, int(toplevel.winfo_reqwidth() or 300))
             target_height = max(1, int(toplevel.winfo_reqheight() or 1))
-            current_width = max(1, int(toplevel.winfo_width()))
-            current_height = max(1, int(toplevel.winfo_height()))
-            actual_x = int(toplevel.winfo_x())
-            actual_y = int(toplevel.winfo_y())
+            parsed = self._parse_geometry(toplevel)
+            if parsed:
+                current_width, current_height, actual_x, actual_y = parsed
+            else:
+                current_width = max(1, int(toplevel.winfo_width()))
+                current_height = max(1, int(toplevel.winfo_height()))
+                actual_x = int(toplevel.winfo_x())
+                actual_y = int(toplevel.winfo_y())
+            current_width = max(1, current_width)
+            current_height = max(1, current_height)
             shrink_current = self._host_resize_shrink
             # Only set minsize for width — never constrain height so the
             # window manager can freely shrink the window vertically.
@@ -1379,8 +1472,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 desired_width = current_width
                 desired_height = current_height
                 preserve_position = bool(self._host_resize_preserve_position)
-                current_x = self._host_resize_anchor_x if preserve_position else None
-                current_y = self._host_resize_anchor_y if preserve_position else None
+                anchor_x = self._host_resize_anchor_x if preserve_position else None
+                anchor_y = self._host_resize_anchor_y if preserve_position else None
 
                 if shrink_current:
                     desired_width = target_width
@@ -1394,12 +1487,21 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 if current_height <= 1:
                     desired_height = target_height
 
-                size_changed = desired_width != current_width or desired_height != current_height
-                position_changed = preserve_position and (current_x != actual_x or current_y != actual_y)
+                width_changed = desired_width != current_width
+                height_changed = desired_height != current_height
 
-                if size_changed or position_changed:
-                    if preserve_position and current_x is not None and current_y is not None:
-                        toplevel.geometry(f"{desired_width}x{desired_height}+{current_x}+{current_y}")
+                if width_changed or height_changed:
+                    if preserve_position and anchor_x is not None and anchor_y is not None:
+                        # Use a combined geometry call with the pre-captured
+                        # anchor (already offset-corrected) so the WM does
+                        # not shift Y when the width changes.
+                        toplevel.geometry(f"{desired_width}x{desired_height}+{anchor_x}+{anchor_y}")
+                    elif width_changed:
+                        # Even without an explicit anchor, pin the current
+                        # position so the WM doesn't shift Y on width
+                        # changes (observed on Linux/X11).
+                        y_offset = self._wm_y_decoration_offset(toplevel)
+                        toplevel.geometry(f"{desired_width}x{desired_height}+{actual_x}+{actual_y - y_offset}")
                     else:
                         toplevel.geometry(f"{desired_width}x{desired_height}")
             except Exception:
@@ -1421,6 +1523,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 self._host_resize_anchor_x = None
                 self._host_resize_anchor_y = None
 
+    # --- Child Window Management ---
+
     def _host_toplevel(self):
         parent = getattr(self, "parent", None)
         if parent is None:
@@ -1437,11 +1541,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             window.lift()
             window.focus_force()
         except Exception:
-            return
-        try:
-            window.attributes("-topmost", True)
-            window.after_idle(lambda w=window: w.winfo_exists() and w.attributes("-topmost", False))
-        except Exception:
             pass
 
     def _position_child_window_next_to_host(self, window, host):
@@ -1456,7 +1555,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             host_x = int(host.winfo_rootx())
             host_y = int(host.winfo_rooty())
             host_width = max(1, int(host.winfo_width()))
-            host_height = max(1, int(host.winfo_height()))
             child_width = max(1, int(window.winfo_reqwidth() or window.winfo_width()))
             child_height = max(1, int(window.winfo_reqheight() or window.winfo_height()))
             screen_width = max(1, int(window.winfo_screenwidth()))
@@ -1477,34 +1575,52 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         except Exception:
             pass
 
-    def _configure_child_window(self, window):
+    def _configure_child_window(self, window, *, host=None, position_fn=None):
         if not window:
             return
-        host = self._host_toplevel()
-        if host is not None:
+        if host is None:
+            host = self._host_toplevel()
+        if position_fn is None:
+            position_fn = self._position_child_window_next_to_host
+        if host:
             try:
                 window.transient(host)
             except Exception:
                 pass
-            self._position_child_window_next_to_host(window, host)
+            position_fn(window, host)
             try:
-                window.after_idle(lambda w=window, h=host: self._position_child_window_next_to_host(w, h))
+                window.after_idle(lambda w=window, h=host, fn=position_fn: fn(w, h))
             except Exception:
                 pass
             try:
-                window.after(30, lambda w=window, h=host: self._position_child_window_next_to_host(w, h))
+                window.after(30, lambda w=window, h=host, fn=position_fn: fn(w, h))
             except Exception:
                 pass
+        try:
+            window.deiconify()
+        except Exception:
+            pass
         self._raise_child_window(window)
+
+    # --- Widget State Control ---
 
     def _set_neutron_error(self, message):
         target = getattr(self, "neutron_error_txt", None)
         if target is None:
-            target = self.error_txt
+            if message and getattr(self, "_plotter_window_kind", None) != "Neutron Plotter":
+                try:
+                    self.error_txt.set(message)
+                except Exception:
+                    pass
+            return
         try:
             target.set(message)
         except Exception:
-            pass
+            if message and getattr(self, "_plotter_window_kind", None) != "Neutron Plotter":
+                try:
+                    self.error_txt.set(message)
+                except Exception:
+                    pass
 
     def _set_main_controls_enabled(self, enable):
         button_state = tk.NORMAL if enable else tk.DISABLED
@@ -1561,7 +1677,9 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             for child in children:
                 walk(child)
                 try:
-                    if isinstance(child, tk.Button) and child.cget("text") == "Cancel":
+                    if isinstance(child, tk.Button) and (
+                        child.cget("text") == "Cancel" or getattr(child, "_busy_plot_button", False)
+                    ):
                         child.config(state=tk.NORMAL)
                         continue
                 except Exception:
@@ -1570,7 +1688,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 try:
                     if isinstance(child, ttk.Combobox):
                         child.config(state=combo_state)
-                    else:
+                    elif isinstance(child, (tk.Button, tk.Entry, tk.Text, tk.Listbox, tk.Checkbutton, tk.Radiobutton, tk.Scale, tk.Spinbox, tk.Menubutton)):
                         child.config(state=default_state)
                 except Exception:
                     pass
@@ -1579,19 +1697,11 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
 
     def _set_plotter_windows_enabled(self, enable):
         self._set_window_widgets_enabled(getattr(self, "plotter_win", None), enable)
-        self._set_window_widgets_enabled(getattr(self, "exact_win", None), enable)
 
-    def _csv_row_value(self, row, *keys):
-        for key in keys:
-            if key in row:
-                return row.get(key, "")
-        return ""
-
-    def _is_done_value(self, value):
-        return str(value).strip().lower() in {"1", "true", "yes", "done", "checked", "x", "☑", "☒", "■", "▣", "✓", "✔", "🟩"}
+    # --- Plot State & Threading ---
 
     def _done_cell_value(self, done):
-        return "🟩" if done else "□"
+        return "■" if done else "□"
 
     def _log_unexpected(self, context, *, level="warning"):
         getattr(logger, level, logger.warning)(context, exc_info=True)
@@ -1713,6 +1823,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             raise result["error"]
         return result["value"]
 
+    # --- Shutdown & UI Dispatch ---
+
     def _shutdown_close_windows(self):
         try:
             if self.csv_viewer_win:
@@ -1722,19 +1834,18 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         finally:
             self._close_csv_viewer()
 
-        for attr in ("plotter_win", "exact_win"):
-            win = getattr(self, attr, None)
-            if not win:
-                continue
+        win = getattr(self, "plotter_win", None)
+        if win:
             try:
                 win.destroy()
             except Exception:
                 pass
             finally:
-                setattr(self, attr, None)
+                self.plotter_win = None
         self._plotter_window_kind = None
 
     def shutdown(self):
+        """Graceful shutdown: cancel active plots, clear overlays, and save route state."""
         self._invalidate_plot_token()
         self._mark_plot_stopped(cancelled=True)
         self._mark_plot_stopped(cancelled=True, exact=True)
@@ -1795,15 +1906,20 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         except Exception:
             return False
 
+    # --- Journal & Dashboard Events ---
+
     def handle_journal_entry(self, system, entry, state):
+        """Process a journal event — buffers pre-GUI events, then dispatches on the main thread."""
         if not getattr(self, "frame", None):
             self._buffer_startup_journal_event(system, entry, state)
             return
+        self._saw_live_journal_event = True
         safe_entry = dict(entry or {})
         safe_state = dict(state or {})
         self._ui_call(self._handle_journal_entry_ui, system or "", safe_entry, safe_state)
 
     def handle_dashboard_entry(self, entry):
+        """Process a Status.json update — tracks live fuel levels and ship flags."""
         if not getattr(self, "frame", None):
             self._buffer_startup_dashboard_event(entry)
             return
@@ -1819,6 +1935,15 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             fuel_reservoir = self._safe_float(fuel.get("FuelReservoir"), None)
             if fuel_reservoir is not None and fuel_reservoir >= 0:
                 self.current_fuel_reservoir = fuel_reservoir
+            # Re-evaluate fuel overlay when tank becomes full
+            if fuel_main is not None and self.overlay_var.get() and self.exact_plotter:
+                fsd = getattr(self, "ship_fsd_data", None) or {}
+                tank_size = self._safe_float(fsd.get("tank_size"), 0)
+                if tank_size > 0 and fuel_main >= tank_size:
+                    try:
+                        self._update_overlay()
+                    except Exception:
+                        pass
 
         # Dashboard GuiFocus updates are a safe overlay wake-up signal.
         if "GuiFocus" in entry:
@@ -1882,10 +2007,9 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             self._log_unexpected("Failed to process journal route progression")
 
         try:
-            if event == 'Loadout':
-                self.process_loadout(entry)
+            self._handle_journal_ship_event(event, entry)
         except Exception:
-            self._log_unexpected("Failed to process journal loadout")
+            self._log_unexpected("Failed to process journal loadout or sell")
 
         try:
             current_coords, current_system = self._get_current_location()
@@ -1908,6 +2032,36 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         except Exception:
             self._log_unexpected("Failed to refresh overlay from journal event")
 
+    def _handle_journal_ship_event(self, event, entry):
+        if event == 'Loadout':
+            self.process_loadout(entry)
+        elif event == 'SetUserShipName':
+            ship_id = entry.get('ShipID')
+            new_name = str(entry.get('UserShipName') or '').strip()
+            new_ident = str(entry.get('UserShipId') or '').strip()
+            cmdr = getattr(self, "current_commander", "")
+            if ship_id is not None:
+                for existing in self._ship_list:
+                    if existing.get('is_owned') and existing.get('commander') == cmdr:
+                        if (existing.get('loadout') or {}).get('ShipID') == ship_id:
+                            existing['name'] = new_name
+                            existing['ident'] = new_ident
+                            if existing.get('loadout'):
+                                existing['loadout']['ShipName'] = new_name
+                                existing['loadout']['ShipIdent'] = new_ident
+                            self._save_ship_list()
+                            break
+                self._refresh_ship_list_rows()
+                self._refresh_ship_list_current_row()
+        elif event == 'ShipyardSell':
+            ship_id = entry.get('SellShipID')
+            cmdr = getattr(self, "current_commander", "")
+            if ship_id is not None and self._ship_list_remove_by_id(ship_id, commander=cmdr):
+                config_key = str(config.get_str(self._EXACT_SELECTED_SHIP_CONFIG_KEY, default="") or "")
+                if config_key == f"owned_{cmdr.strip().lower()}_{ship_id}":
+                    self._reset_exact_ship_to_current()
+                self._destroy_exact_ship_dialog("_exact_ship_list_win")
+
     def _journal_event_refreshes_overlay(self, event):
         return event in {
             "CarrierJump",
@@ -1919,6 +2073,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             "SupercruiseEntry",
             "SupercruiseExit",
         }
+
+    # --- System Resolution & Utilities ---
 
     def _resolve_system_record_async(self, query, *, on_success, on_not_found=None, on_error=None, token=None):
         query = (query or "").strip()
@@ -1946,9 +2102,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             return ""
         return "✓" if text.lower() == "yes" or value is True else "✕"
 
-    def _is_terraformable_value(self, value):
-        return str(value).strip().lower() in {"yes", "true", "1", "✓", "✔"}
-
     def _traditional_form_data(self, params):
         encoded = []
         for key, value in params.items():
@@ -1959,6 +2112,14 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 encoded.append((key, value))
         return encoded
 
+    def _get_entry_value(self, widget):
+        try:
+            if hasattr(widget, "get"):
+                return str(widget.get() or "")
+        except Exception:
+            pass
+        return ""
+
     def _set_entry_value(self, widget, value):
         try:
             widget.delete(0, tk.END)
@@ -1966,44 +2127,13 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         except Exception:
             pass
 
-    def _clamp_numeric_input(self, widget, minimum, maximum, *, integer=False, error_message="Invalid number"):
-        return clamp_numeric_input(
-            widget,
-            minimum,
-            maximum,
-            integer=integer,
-            error_message=error_message,
-            set_entry_value=self._set_entry_value,
-        )
-
     def _clamp_spinbox_input(self, widget, *, integer=False, error_message="Invalid number"):
         return clamp_spinbox_input(
             widget,
             integer=integer,
             error_message=error_message,
-            safe_float=self._safe_float,
             set_entry_value=self._set_entry_value,
         )
-
-    def _live_clamp_spinbox_input(self, widget, *, integer=False):
-        return live_clamp_spinbox_input(
-            widget,
-            integer=integer,
-            parse_number=self._parse_number,
-            set_entry_value=self._set_entry_value,
-        )
-
-    def _bind_live_spinbox_clamp(self, widget, *, integer=False):
-        def _apply(_event=None):
-            try:
-                widget.after_idle(lambda w=widget: self._live_clamp_spinbox_input(w, integer=integer))
-            except Exception:
-                try:
-                    self._live_clamp_spinbox_input(widget, integer=integer)
-                except Exception:
-                    pass
-
-        bind_live_spinbox_clamp(widget, _apply)
 
     def _close_csv_viewer(self):
         self.csv_viewer_win = None
@@ -2021,8 +2151,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             return self.exploration_mode
         if self.route_type == "fleet_carrier":
             return "Fleet Carrier Router"
-        if self.route_type in ("exact", "galaxy"):
-            return "Galaxy Plotter"
+        if self.route_type == "exact":
+            return "Exact Plotter"
         return ""
 
     def _resolve_system_record(self, query):
@@ -2030,27 +2160,28 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         if not query:
             return None
         if query.isdigit():
-            resp = requests.get(f"https://spansh.co.uk/api/system/{query}", timeout=10)
-            if resp.status_code == 200:
-                data = resp.json()
+            try:
+                data = WebUtils.spansh_get(f"/api/system/{query}", timeout=10)
                 return data.get("record", data)
-            return None
+            except Exception:
+                logger.debug("Spansh system resolve by ID64 failed", exc_info=True)
+                return None
 
-        resp = requests.get("https://spansh.co.uk/api/search/systems", params={"q": query}, timeout=10)
-        if resp.status_code != 200:
+        try:
+            data = WebUtils.spansh_get("/api/search/systems", params={"q": query}, timeout=10)
+            results = data.get("results", data if isinstance(data, list) else [])
+            if isinstance(results, dict):
+                results = results.get("results", [])
+            if not isinstance(results, list):
+                return None
+            exact = next((r for r in results if (r.get("name") or "").strip().lower() == query.lower()), None)
+            return exact
+        except Exception:
+            logger.debug("Spansh system resolve by name failed", exc_info=True)
             return None
-        data = resp.json()
-        results = data.get("results", data if isinstance(data, list) else [])
-        if isinstance(results, dict):
-            results = results.get("results", [])
-        if not isinstance(results, list):
-            return None
-        exact = next((r for r in results if (r.get("name") or "").strip().lower() == query.lower()), None)
-        return exact
 
     def show_csv_viewer(self):
-        """Open the route viewer window."""
-        return CsvViewerWindow(self).show()
+        return self.csv_viewer.show()
 
     def _refresh_csv_viewer_if_open(self):
         if not self.csv_viewer_win:
@@ -2062,17 +2193,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         except Exception:
             self._close_csv_viewer()
             return
-        CsvViewerWindow(self).show(force_refresh=True)
-
-    def _capture_csv_viewer_geometry(self):
-        if not self.csv_viewer_win:
-            return None
-        try:
-            if self.csv_viewer_win.winfo_exists():
-                return self.csv_viewer_win.geometry()
-        except Exception:
-            self._close_csv_viewer()
-        return None
+        self.csv_viewer.show(force_refresh=True)
 
     def _close_csv_viewer_if_open(self):
         if not self.csv_viewer_win:
@@ -2084,14 +2205,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             pass
         self._close_csv_viewer()
 
-    def _restore_csv_viewer_after_route_change(self, geometry):
-        if not geometry:
-            return
-        try:
-            CsvViewerWindow(self).show(force_refresh=True, restore_geometry=geometry)
-        except Exception:
-            self._log_unexpected("Failed to restore route viewer")
-
     def show_error(self, error):
         self.error_txt.set(error)
         self.error_lbl.grid()
@@ -2100,12 +2213,10 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self.error_lbl.grid_remove()
 
     def enable_plot_gui(self, enable):
-        """Enable/disable neutron plotter widgets in the Toplevel window."""
         self._set_main_controls_enabled(enable)
         self._set_plotter_windows_enabled(enable)
 
-    #   -- END GUI part --
-
+    # --- Route Persistence & Startup ---
 
     def open_last_route(self):
         try:
@@ -2136,7 +2247,11 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 self.jumps_left = 0
             self.next_stop = self._route_name_at(self.offset, "")
 
-            if (self.exact_plotter or self.galaxy) and self.offset < len(self.route):
+            # Auto-advance on restart if player is already ahead in the route.
+            # Deferred so monitor.state has time to populate after journal replay.
+            self.frame.after(3000, self._startup_route_advance_check)
+
+            if self.exact_plotter and self.offset < len(self.route):
                 self.pleaserefuel = self._route_refuel_required_at(self.offset)
 
             self.compute_distances()
@@ -2151,6 +2266,31 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         finally:
             self._host_window_resize_ready = True
 
+    def _startup_route_advance_check(self):
+        if not self.route or self._route_complete_for_ui():
+            return
+        # Skip if no journal event received yet — prevents false advance on hot reload.
+        if not self._saw_live_journal_event:
+            return
+        current_sys = str(monitor.state.get('SystemName') or '').strip()
+        if not current_sys:
+            return
+        target_index = None
+        for i in range(self.offset, len(self.route)):
+            if self._route_name_at(i, '').strip().lower() == current_sys.lower():
+                target_index = i
+                break
+        if target_index is None:
+            return
+        last_state = None
+        while self.offset <= target_index and not self._route_complete_for_ui():
+            prev = self.offset
+            last_state = self._advance_route_state()
+            if self.offset == prev:
+                break
+        if last_state:
+            self._apply_route_ui_side_effects(last_state)
+
     def _seed_current_location_from_monitor(self):
         try:
             state = getattr(monitor, "state", {}) or {}
@@ -2160,6 +2300,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 self._set_current_location(coords=coords, system=system)
         except Exception:
             pass
+
+    # --- Clipboard & Waypoint Navigation ---
 
     def _show_clipboard_error_once(self):
         if self._clipboard_error_reported:
@@ -2263,12 +2405,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self._copy_to_clipboard(self.next_stop)
 
     def goto_next_waypoint(self):
-        # allow manual navigation even if offset wasn't set by journal events yet
         if len(self.route) == 0:
             return
-
-        if not hasattr(self, "offset") or self.offset is None:
-            self.offset = 0
 
         if self.offset < len(self.route) - 1:
             self._manual_nav = True
@@ -2283,12 +2421,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 self._waypoint_reached_restock = False
 
     def goto_prev_waypoint(self):
-        # allow manual navigation even if offset wasn't set by journal events yet
         if len(self.route) == 0:
             return
-
-        if not hasattr(self, "offset") or self.offset is None:
-            self.offset = 0
 
         if self.offset > 0:
             self._manual_nav = True
@@ -2331,6 +2465,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             index -= 1
         return index
 
+    # --- Distance Computation ---
+
     def compute_distances(self):
         """Compute LY from prev, to next, and total remaining.
 
@@ -2348,12 +2484,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         if not (0 <= self.offset < len(self.route)):
             return
 
-        def safe_flt(x):
-            try:
-                return float(x)
-            except Exception:
-                return None
-
         def fmt_num(v):
             """Format number: integer if whole, 2 decimals otherwise."""
             if not math.isfinite(v):
@@ -2361,23 +2491,23 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             return str(int(v)) if v == int(v) else f"{v:.2f}"
 
         planner_name = self._current_route_planner_name()
-        use_spansh_distance_labels = planner_name in ("Neutron Plotter", "Galaxy Plotter") or self.exact_plotter or self.fleetcarrier
+        use_spansh_distance_labels = planner_name in ("Neutron Plotter", "Exact Plotter") or self.exact_plotter or self.fleetcarrier
 
         if self.fleetcarrier:
             group_start, group_end = self._fleet_group_bounds(self.offset)
             pv = self._route_distance_to_arrival_at(group_start)
             if pv is not None:
-                self.dist_prev = f"{'Distance (Ly)' if use_spansh_distance_labels else 'Jump LY'}: {fmt_num(pv)}"
+                self.dist_prev = f"{'Distance (LY)' if use_spansh_distance_labels else 'Jump LY'}: {fmt_num(pv)}"
 
             if group_end < len(self.route) - 1:
                 nv = self._route_distance_to_arrival_at(group_end + 1)
                 if nv is not None:
-                    next_label = "Next Distance (Ly)" if use_spansh_distance_labels else "Next jump LY"
+                    next_label = "Next Distance (LY)" if use_spansh_distance_labels else "Next jump LY"
                     self.dist_next = f"{next_label}: {fmt_num(nv)}"
 
             total_rem = self._route_remaining_distance_at(group_end)
             if total_rem is not None:
-                remaining_label = "Remaining (Ly)" if use_spansh_distance_labels else "LY afterwards"
+                remaining_label = "Remaining (LY)" if use_spansh_distance_labels else "LY afterwards"
                 self.dist_remaining = f"{remaining_label}: {fmt_num(total_rem)}"
             return
 
@@ -2385,7 +2515,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         # distance_to_arrival (index 2) is the distance from route[i-1] -> route[i]
         pv = self._route_distance_to_arrival_at(self.offset)
         if pv is not None:
-            self.dist_prev = f"{'Distance (Ly)' if use_spansh_distance_labels else 'Jump LY'}: {fmt_num(pv)}"
+            self.dist_prev = f"{'Distance (LY)' if use_spansh_distance_labels else 'Jump LY'}: {fmt_num(pv)}"
         else:
             pj = self._route_progress_value_at(self.offset, None)
             if pj is not None:
@@ -2397,7 +2527,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         if self.offset < len(self.route) - 1:
             nv = self._route_distance_to_arrival_at(self.offset + 1)
             if nv is not None:
-                next_label = "Next Distance (Ly)" if use_spansh_distance_labels else "Next jump LY"
+                next_label = "Next Distance (LY)" if use_spansh_distance_labels else "Next jump LY"
                 self.dist_next = f"{next_label}: {fmt_num(nv)}"
             else:
                 nv2 = self._route_progress_value_at(self.offset + 1, None)
@@ -2422,7 +2552,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 total_rem = total
 
         if total_rem is not None:
-            remaining_label = "Remaining (Ly)" if use_spansh_distance_labels else "LY afterwards"
+            remaining_label = "Remaining (LY)" if use_spansh_distance_labels else "LY afterwards"
             self.dist_remaining = f"{remaining_label}: {fmt_num(total_rem)}"
         else:
             s = 0.0
@@ -2438,7 +2568,10 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             else:
                 self.dist_remaining = ""
 
+    # --- Route Advancement & Clearing ---
+
     def _advance_route_state(self, direction=1):
+        """Pure state machine: move offset by *direction*, update done flags, and return a state dict for UI side-effects."""
         if len(self.route) == 0:
             self.next_stop = "No route planned"
             return {
@@ -2458,10 +2591,8 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
 
         reached_restock = False
         reached_waypoint = direction > 0 and not getattr(self, "_manual_nav", False)
-        previous_offset = self.offset if hasattr(self, "offset") and self.offset is not None else 0
+        previous_offset = self.offset
 
-        if not hasattr(self, "offset") or self.offset is None:
-            self.offset = 0
         if self.offset < 0:
             self.offset = 0
         if self.offset >= len(self.route):
@@ -2476,6 +2607,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                 self.jumps_left = self._route_progress_value_at(self.offset, 0) or 0
             elif direction > 0:
                 self.jumps_left -= self._route_progress_value_at(self.offset, 0) or 0
+                self.jumps_left = max(0, self.jumps_left)
                 if self.offset < len(self.route) - 1:
                     self.offset += 1
             elif self.offset > 0:
@@ -2509,7 +2641,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         return {
             "has_route": True,
             "copy_waypoint": True,
-            "update_overlay": bool(self.exact_plotter or self.galaxy or self._is_neutron_route_active()),
+            "update_overlay": bool(self.exact_plotter or self._is_neutron_route_active()),
         }
 
     def _apply_route_ui_side_effects(self, state, *, refresh_viewer=True):
@@ -2523,11 +2655,12 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         self.save_all_route()
 
     def update_route(self, direction=1, *, refresh_viewer=True):
+        """Advance the route offset and apply all resulting UI and overlay updates."""
         state = self._advance_route_state(direction)
         self._apply_route_ui_side_effects(state, refresh_viewer=refresh_viewer)
 
-
     def clear_route(self, show_dialog=True):
+        """Reset all route state, clear the GUI, overlays, and saved route file."""
         clear = confirmDialog.askyesno("SpanshTools","Are you sure you want to clear the current route?") if show_dialog else True
 
         if clear:
@@ -2538,7 +2671,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
                     pass
                 self._close_csv_viewer()
             self._close_plotter_window()
-            self._close_exact_window()
             self._clear_overlay()
             self._clear_neutron_overlay()
             self.offset = 0
@@ -2547,154 +2679,21 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
             self.route_done = []
             self.jumps_left = 0
             self.route_type = None
-            self.fleetcarrier = False
-            self.galaxy = False
-            self.exact_plotter = False
             self.exact_route_data = []
             self.fleet_carrier_data = []
+            self.neutron_route_data = []
             self._reset_exploration_state()
             self._clear_plotter_settings()
-            try:
-                os.remove(self.save_route_path)
-            except Exception:
-                logger.info("No route to delete")
-            try:
-                os.remove(self.offset_file_path)
-            except Exception:
-                logger.info("No offset file to delete")
+            self._first_wp_distances = ()
             try:
                 os.remove(self._route_state_path())
-            except Exception:
+            except FileNotFoundError:
                 logger.info("No route state file to delete")
-            try:
-                os.remove(self.exact_settings_path)
             except Exception:
-                pass
-            self._exact_settings = None
-
+                logger.warning("Failed to delete route state file", exc_info=True)
             self.update_gui()
 
-    def process_loadout(self, entry):
-        """Extract FSD parameters from a Loadout journal event."""
-        from .fsd_data import get_fsd_specs, GUARDIAN_FSD_BOOSTS
-
-        modules = entry.get('Modules', [])
-        fsd_module = None
-        for mod in modules:
-            if mod.get('Slot') == 'FrameShiftDrive':
-                fsd_module = mod
-                break
-
-        if not fsd_module:
-            return
-
-        item_name = fsd_module.get('Item', '')
-        specs = get_fsd_specs(item_name)
-        if not specs:
-            return
-
-        fsd_class = specs['class']
-        fsd_rating = specs['rating']
-
-        # Start with base specs
-        fsd_data = dict(specs)
-
-        # Apply engineering overrides if present
-        engineering = fsd_module.get('Engineering', {})
-        modifiers = engineering.get('Modifiers', [])
-        for modifier in modifiers:
-            label = modifier.get('Label', '')
-            value = modifier.get('Value')
-            if value is None:
-                continue
-            if label == 'FSDOptimalMass':
-                fsd_data['optimal_mass'] = float(value)
-            elif label == 'MaxFuelPerJump':
-                fsd_data['max_fuel_per_jump'] = float(value)
-
-        # Ship-level data
-        fuel_capacity = entry.get('FuelCapacity', {})
-        fsd_data['tank_size'] = fuel_capacity.get('Main', 16)
-        fsd_data['reserve_size'] = fuel_capacity.get('Reserve', 0.63)
-        fsd_data['unladen_mass'] = entry.get('UnladenMass', 0)
-        fsd_data['cargo_capacity'] = entry.get('CargoCapacity', 0)
-
-        # Guardian FSD Booster detection
-        range_boost = 0.0
-        for mod in modules:
-            item = mod.get('Item', '').lower()
-            if 'fsdbooster' in item or 'fsd_booster' in item:
-                match = re.search(r'size(\d+)', item)
-                if match:
-                    size = int(match.group(1))
-                    range_boost = GUARDIAN_FSD_BOOSTS.get(size, 0.0)
-        fsd_data['range_boost'] = range_boost
-
-        self.ship_fsd_data = fsd_data
-        logger.info(f"FSD data detected: class {fsd_class}{fsd_rating}, "
-                     f"optimal_mass={fsd_data['optimal_mass']}, "
-                     f"max_fuel={fsd_data['max_fuel_per_jump']}, "
-                     f"tank={fsd_data['tank_size']}, "
-                     f"boost={range_boost}")
-
-    def try_fsd_from_state(self, state):
-        """Fallback: extract FSD data from EDMC's state dict if Loadout wasn't received."""
-        if self.ship_fsd_data is not None:
-            return
-        if not state:
-            return
-        self._detect_fsd_from_state(state)
-
-    def _detect_fsd_from_monitor(self):
-        """Pull FSD data directly from EDMC's monitor.state."""
-        try:
-            self._detect_fsd_from_state(monitor.state)
-        except Exception as e:
-            logger.debug(f"Could not detect FSD from monitor: {e}")
-
-    def _detect_fsd_from_state(self, state):
-        """Extract FSD data from an EDMC state dict (monitor.state or journal_entry state)."""
-        if not state:
-            return
-        modules = state.get('Modules')
-        if not modules:
-            return
-        try:
-            # EDMC state['Modules'] is a dict keyed by slot name
-            if isinstance(modules, dict):
-                module_list = []
-                for slot_name, module in modules.items():
-                    if isinstance(module, dict):
-                        enriched = dict(module)
-                        enriched.setdefault("Slot", slot_name)
-                        module_list.append(enriched)
-                    else:
-                        module_list.append(module)
-            else:
-                module_list = list(modules)
-
-            # Build FuelCapacity — state may store it as a number or as a dict
-            fuel_cap = state.get('FuelCapacity', 16)
-            if isinstance(fuel_cap, dict):
-                fuel_main = fuel_cap.get('Main', 16)
-                fuel_reserve = fuel_cap.get('Reserve', 0.63)
-            else:
-                fuel_main = fuel_cap if fuel_cap else 16
-                fuel_reserve = 0.63
-
-            synthetic = {
-                'event': 'Loadout',
-                'Modules': module_list,
-                'FuelCapacity': {
-                    'Main': fuel_main,
-                    'Reserve': fuel_reserve,
-                },
-                'UnladenMass': state.get('UnladenMass', 0),
-                'CargoCapacity': state.get('CargoCapacity', 0),
-            }
-            self.process_loadout(synthetic)
-        except Exception as e:
-            logger.debug(f"Could not extract FSD from state: {e}")
+    # --- Plugin Update System ---
 
     def has_staged_update(self):
         return bool(self.spansh_updater and self.spansh_updater.is_staged())
@@ -2725,7 +2724,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         return bool(self.spansh_updater.install_staged())
 
     def check_for_update(self):
-        """Check GitHub for a newer release. Runs in a background thread."""
         def _check():
             try:
                 if self.update_available or self.has_staged_update():
@@ -2747,14 +2745,12 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         threading.Thread(target=_check, daemon=True).start()
 
     def _show_update_button(self):
-        """Show the update warning button next to the title."""
         self._refresh_update_button_appearance()
         if not self._update_btn_visible:
-            self.update_btn.place(relx=1.0, rely=0.5, x=0, y=0, anchor="e")
+            self.update_btn.grid(row=0, column=2, sticky=tk.E)
             self._update_btn_visible = True
 
     def _show_update_popup(self):
-        """Show a popup with update info and install option."""
         if not self._update_button_actionable():
             return
 
@@ -2763,7 +2759,6 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
         win.resizable(False, False)
         win.minsize(350, 0)
 
-        # Position near the mouse pointer
         x = self.parent.winfo_pointerx() + 15
         y = self.parent.winfo_pointery() + 10
         win.geometry(f"+{x}+{y}")
@@ -2797,9 +2792,3 @@ class SpanshTools(OverlayMixin, PlottersMixin, RouteIOMixin):
 
         tk.Button(btn_frame, text="Install on Quit", command=_accept, width=14).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Skip", command=_dismiss, width=10).pack(side=tk.LEFT, padx=5)
-
-    def install_update(self):
-        """Backward-compatible entry point; only installs already-staged updates."""
-        if self.spansh_updater and self.update_available:
-            return self.install_staged_update()
-        return False

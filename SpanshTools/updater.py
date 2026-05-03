@@ -1,39 +1,23 @@
+from .web_utils import WebUtils
 import json
-import logging
 import os
 import re
 import shutil
 import tempfile
 import zipfile
 
-import requests
-
-from config import appname
-from . import fsd_data
-
-plugin_name = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
-logger = logging.getLogger(f"{appname}.{plugin_name}")
-
-GITHUB_REPO = "wuuthradd/EDMC-SpanshTools"
-GITHUB_API_LATEST = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-GITHUB_RAW_FSD_SPECS = f"https://raw.githubusercontent.com/{GITHUB_REPO}/master/SpanshTools/fsd_specs.json"
-RELEASE_ARCHIVE_ROOT = "EDMC-SpanshTools"
-RUNTIME_PACKAGE_DIRS = ("SpanshTools", "tksheet")
-REQUIRED_ARCHIVE_PATHS = (
-    "load.py",
-    "version.json",
-    "SpanshTools/__init__.py",
-    "SpanshTools/fsd_specs.json",
-    "tksheet/__init__.py",
+from . import ship_moduling
+from .constants import (
+    GITHUB_API_LATEST,
+    GITHUB_RAW_FSD_SPECS,
+    RELEASE_ARCHIVE_ROOT,
+    RUNTIME_PACKAGE_DIRS,
+    REQUIRED_ARCHIVE_PATHS,
+    USER_DATA_FILES,
+    STAGED_ARCHIVE_NAME,
+    STAGED_METADATA_NAME,
+    logger,
 )
-USER_DATA_FILES = {
-    "route.csv",
-    "offset",
-    "route_state.json",
-    "exact_settings.json",
-    "plotter_settings.json",
-    "update.zip",
-}
 
 
 def _coerce_fsd_specs_version(value, default=1):
@@ -41,7 +25,7 @@ def _coerce_fsd_specs_version(value, default=1):
         version = int(value)
         if version >= 1:
             return version
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         pass
     return default
 
@@ -50,17 +34,16 @@ def _normalize_fsd_specs_payload(payload, *, default_version=1):
     if isinstance(payload, dict) and "specs" in payload:
         return {
             "version": _coerce_fsd_specs_version(payload.get("version"), default_version),
-            "specs": fsd_data.normalize_specs_map(payload.get("specs")),
+            "specs": ship_moduling.normalize_specs_map(payload.get("specs")),
         }
     return {
         "version": _coerce_fsd_specs_version(default_version, 1),
-        "specs": fsd_data.normalize_specs_map(payload),
+        "specs": ship_moduling.normalize_specs_map(payload),
     }
 
 
 class SpanshUpdater:
-    STAGED_ARCHIVE_NAME = "update.zip"
-    STAGED_METADATA_NAME = "update_pending.json"
+    """Handles version checking, download staging, and safe in-place plugin updates from GitHub."""
 
     def __init__(self, latest_version, download_url, changelog, plugin_dir):
         self.version = latest_version
@@ -70,8 +53,9 @@ class SpanshUpdater:
 
     @classmethod
     def load_staged_metadata(cls, plugin_dir):
-        metadata_path = os.path.join(plugin_dir, cls.STAGED_METADATA_NAME)
-        archive_path = os.path.join(plugin_dir, cls.STAGED_ARCHIVE_NAME)
+        """Load and validate staged update metadata; returns None and cleans up if artifacts are invalid."""
+        metadata_path = os.path.join(plugin_dir, STAGED_METADATA_NAME)
+        archive_path = os.path.join(plugin_dir, STAGED_ARCHIVE_NAME)
         try:
             with open(metadata_path, "r", encoding="utf-8") as handle:
                 payload = json.load(handle)
@@ -105,7 +89,7 @@ class SpanshUpdater:
 
     @staticmethod
     def _fsd_specs_path(plugin_dir):
-        return os.path.join(plugin_dir, "SpanshTools", "fsd_specs.json")
+        return os.path.join(plugin_dir, "SpanshTools", "data", "fsd_specs.json")
 
     @classmethod
     def _load_local_fsd_specs(cls, plugin_dir):
@@ -127,19 +111,16 @@ class SpanshUpdater:
     @classmethod
     def _reload_local_fsd_specs(cls, plugin_dir):
         expected_path = os.path.abspath(cls._fsd_specs_path(plugin_dir))
-        actual_path = os.path.abspath(fsd_data.bundled_data_file_path())
+        actual_path = os.path.abspath(ship_moduling.bundled_data_file_path())
         if expected_path != actual_path:
             return True
-        return fsd_data.reload_specs_from_bundled_data()
+        return ship_moduling.reload_specs_from_bundled_data()
 
     @staticmethod
     def _fetch_repo_fsd_specs():
         try:
-            response = requests.get(GITHUB_RAW_FSD_SPECS, timeout=10)
-            if response.status_code != 200:
-                logger.debug("FSD specs fetch returned %s", response.status_code)
-                return None
-            payload = json.loads(response.content)
+            response = WebUtils.get_raw(GITHUB_RAW_FSD_SPECS, timeout=10)
+            payload = response.json()
         except Exception as exc:
             logger.debug("FSD specs update check failed: %s", exc)
             return None
@@ -153,8 +134,8 @@ class SpanshUpdater:
             return False
 
         local_payload = cls._load_local_fsd_specs(plugin_dir)
-        local_version = int((local_payload or {}).get("version", 0))
-        remote_version = int(remote_payload.get("version", 0))
+        local_version = _coerce_fsd_specs_version((local_payload or {}).get("version"), default=0)
+        remote_version = _coerce_fsd_specs_version(remote_payload.get("version"), default=0)
         if remote_version <= local_version:
             return False
 
@@ -167,7 +148,7 @@ class SpanshUpdater:
 
     @classmethod
     def _clear_staged_artifacts_for(cls, plugin_dir):
-        for name in (cls.STAGED_ARCHIVE_NAME, cls.STAGED_METADATA_NAME):
+        for name in (STAGED_ARCHIVE_NAME, STAGED_METADATA_NAME):
             path = os.path.join(plugin_dir, name)
             try:
                 os.remove(path)
@@ -180,10 +161,10 @@ class SpanshUpdater:
         self._clear_staged_artifacts_for(self.plugin_dir)
 
     def _staged_archive_path(self):
-        return os.path.join(self.plugin_dir, self.STAGED_ARCHIVE_NAME)
+        return os.path.join(self.plugin_dir, STAGED_ARCHIVE_NAME)
 
     def _staged_metadata_path(self):
-        return os.path.join(self.plugin_dir, self.STAGED_METADATA_NAME)
+        return os.path.join(self.plugin_dir, STAGED_METADATA_NAME)
 
     @staticmethod
     def _atomic_write_json(path, payload):
@@ -224,14 +205,11 @@ class SpanshUpdater:
         return os.path.exists(self._staged_archive_path())
 
     def stage(self):
-        """Download the update archive to the plugin directory for later install."""
+        """Download the release zip to a staging area for installation on next restart."""
         temp_path = f"{self._staged_archive_path()}.partial"
         try:
             logger.info("Downloading staged SpanshTools %s from %s", self.version, self.download_url)
-            response = requests.get(self.download_url, timeout=30)
-            if response.status_code != 200:
-                logger.warning("Failed to download staged update: HTTP %s", response.status_code)
-                return False
+            response = WebUtils.get_raw(self.download_url, timeout=30)
             with open(temp_path, "wb") as handle:
                 handle.write(response.content)
             if not zipfile.is_zipfile(temp_path):
@@ -254,16 +232,9 @@ class SpanshUpdater:
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
             except Exception:
-                pass
-
-    def install(self):
-        """Download, stage, and install immediately."""
-        if not self.stage():
-            return False
-        return self.install_staged()
+                logger.debug("Failed to clean up temp update file", exc_info=True)
 
     def install_staged(self):
-        """Install a previously staged update archive."""
         staged_zip = self._staged_archive_path()
         if not os.path.exists(staged_zip):
             return False
@@ -335,12 +306,34 @@ class SpanshUpdater:
                 shutil.copy2(backup_entry, dest)
 
     def _install_runtime_packages(self, staging_dir, package_dirs):
+        """Copy package directories from staging, preserving user data files via an explicit allowlist."""
         for entry in package_dirs:
             source = os.path.join(staging_dir, entry)
             dest = os.path.join(self.plugin_dir, entry)
+            if not os.path.isdir(source):
+                continue
+
             if os.path.isdir(dest):
-                shutil.rmtree(dest)
-            shutil.copytree(source, dest)
+                # Delete everything except the data/ subdirectory
+                for item in os.listdir(dest):
+                    item_path = os.path.join(dest, item)
+                    if item == "data" and os.path.isdir(item_path):
+                        continue
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                    else:
+                        os.remove(item_path)
+
+            # Copy new files (skip data/ since we kept it)
+            for root, dirs, files in os.walk(source):
+                rel_root = os.path.relpath(root, source)
+                dest_root = os.path.join(dest, rel_root)
+                os.makedirs(dest_root, exist_ok=True)
+                if rel_root.startswith("data") and os.path.isdir(os.path.join(dest, "data")):
+                    # Inside data/: only replace bundled data files, not user data
+                    files = [f for f in files if f in ("fsd_specs.json", "ship_type_names.json")]
+                for f in files:
+                    shutil.copy2(os.path.join(root, f), os.path.join(dest_root, f))
 
     def _install_top_level_files(self, staging_dir, top_level_files):
         for entry in top_level_files:
@@ -349,11 +342,12 @@ class SpanshUpdater:
             shutil.copy2(source, dest)
 
     def _install_from_zip(self, zip_path):
-        """Extract and install an already-downloaded archive."""
+        """Extract, validate, and install a release zip — backs up existing files for rollback on failure."""
         temp_root = tempfile.mkdtemp(prefix="spansh_update_", dir=self.plugin_dir)
         staging_dir = os.path.join(temp_root, "staging")
         backup_dir = os.path.join(temp_root, "backup")
         package_dirs = list(RUNTIME_PACKAGE_DIRS)
+        top_level_files = []
         install_committed = False
         backup_created = False
 
@@ -386,7 +380,7 @@ class SpanshUpdater:
                 if os.path.isdir(temp_root):
                     shutil.rmtree(temp_root)
             except Exception:
-                pass
+                logger.debug("Failed to clean up temp update directory", exc_info=True)
 
     @classmethod
     def _select_release_asset_url(cls, release_data, version):
@@ -404,14 +398,9 @@ class SpanshUpdater:
 
     @staticmethod
     def check_latest():
-        """Query GitHub API for the latest release. Returns (version, download_url, changelog) or None."""
+        """Returns (version, download_url, changelog) or None."""
         try:
-            response = requests.get(GITHUB_API_LATEST, timeout=5)
-            if response.status_code != 200:
-                logger.debug("GitHub API returned %s", response.status_code)
-                return None
-
-            data = json.loads(response.content)
+            data = WebUtils.github_get(GITHUB_API_LATEST, timeout=5)
             tag = data.get("tag_name", "")
             version = tag.lstrip("v")
             changelog = data.get("body", "") or ""
@@ -432,7 +421,7 @@ class SpanshUpdater:
             return None
 
         normalized = normalized.split("+", 1)[0]
-        core, sep, prerelease = normalized.partition("-")
+        core, _sep, prerelease = normalized.partition("-")
 
         core_parts = []
         for part in core.split("."):

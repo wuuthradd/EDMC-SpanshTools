@@ -3915,16 +3915,42 @@ class MainTable(tk.Canvas):
         self.set_yviews(*y_args)
 
     def mousewheel(self, event: Any) -> None:
-        if event.delta < 0 or event.num == 5:
-            self.yview_scroll(1, "units")
-            self.RI.yview_scroll(1, "units")
-            self.y_move_synced_scrolls("moveto", self.yview()[0])
-        elif event.delta >= 0 or event.num == 4:
-            if self.canvasy(0) <= 0:
+        if self.PAR.ops.row_snap_scroll and len(self.row_positions) > 1:
+            top_y = self.canvasy(0)
+            content_h = self.row_positions[-1]
+            canvas_h = self.winfo_height()
+            sr_h = content_h + self.PAR.ops.empty_vertical + 3
+            max_y = max(0, sr_h - canvas_h) if sr_h > canvas_h else 0
+            idx = bisect_left(self.row_positions, top_y)
+            if event.delta < 0 or event.num == 5:
+                if top_y >= max_y - 1:
+                    return
+                target = min(idx + 1, len(self.row_positions) - 2)
+                new_y = min(self.row_positions[target], max_y)
+            elif event.delta >= 0 or event.num == 4:
+                if top_y <= 0:
+                    return
+                # If at max_y (non-row-boundary), snap back to previous row boundary
+                if idx > 0 and top_y > self.row_positions[idx - 1]:
+                    target = idx - 1
+                else:
+                    target = max(idx - 2, 0)
+                new_y = self.row_positions[target]
+            else:
                 return
-            self.yview_scroll(-1, "units")
-            self.RI.yview_scroll(-1, "units")
-            self.y_move_synced_scrolls("moveto", self.yview()[0])
+            frac = new_y / sr_h if sr_h > 0 else 0
+            self.yview_moveto(frac)
+            self.RI.yview_moveto(frac)
+        else:
+            if event.delta < 0 or event.num == 5:
+                self.yview_scroll(1, "units")
+                self.RI.yview_scroll(1, "units")
+            elif event.delta >= 0 or event.num == 4:
+                if self.canvasy(0) <= 0:
+                    return
+                self.yview_scroll(-1, "units")
+                self.RI.yview_scroll(-1, "units")
+        self.y_move_synced_scrolls("moveto", self.yview()[0])
         self.main_table_redraw_grid_and_text(redraw_header=False, redraw_row_index=True)
 
     def shift_mousewheel(self, event: Any) -> None:

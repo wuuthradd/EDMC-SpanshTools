@@ -8,10 +8,37 @@ import tkinter as tk
 from bisect import bisect_left
 from collections import deque
 from collections.abc import Callable, Generator, Hashable, Iterable, Iterator, Sequence
-from difflib import SequenceMatcher
 from itertools import chain, islice, repeat
 from types import ModuleType
 from typing import Any, Literal
+
+try:
+    from difflib import SequenceMatcher
+except ModuleNotFoundError:
+    class SequenceMatcher:  # minimal fallback for stripped embedded Python envs
+        def __init__(self, _isjunk=None, a: str = "", b: str = "", autojunk: bool = False):
+            self.a = a or ""
+            self.b = b or ""
+
+        def set_seq2(self, b: str) -> None:
+            self.b = b or ""
+
+        def ratio(self) -> float:
+            a, b = self.a, self.b
+            if not a and not b:
+                return 1.0
+            if not a or not b:
+                return 0.0
+            common = 0
+            seen = {}
+            for char in b:
+                seen[char] = seen.get(char, 0) + 1
+            for char in a:
+                count = seen.get(char, 0)
+                if count:
+                    common += 1
+                    seen[char] = count - 1
+            return (2.0 * common) / (len(a) + len(b))
 
 from .colors import color_map
 from .constants import align_value_error, symbols_set

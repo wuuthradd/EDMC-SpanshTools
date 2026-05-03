@@ -1,7 +1,10 @@
 """Pytest conftest — mock EDMC modules so SpanshTools can be imported outside EDMC."""
 
+import gc
 import os
+import shutil
 import sys
+import tkinter as tk
 import types
 import tempfile
 import json
@@ -14,6 +17,20 @@ _PLUGIN_ROOT = os.path.dirname(_TESTS_DIR)
 with open(os.path.join(_PLUGIN_ROOT, "version.json"), "r", encoding="utf-8") as _handle:
     PLUGIN_VERSION = json.load(_handle)["version"]
 
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+STANDARD_5A_FSD_SPEC = {
+    "class": 5,
+    "rating": "A",
+    "optimal_mass": 1050.0,
+    "max_fuel_per_jump": 5.0,
+    "fuel_power": 2.45,
+    "fuel_multiplier": 0.012,
+    "supercharge_multiplier": 4,
+}
+
 
 def bump_patch(version):
     parts = version.split(".")
@@ -22,7 +39,9 @@ def bump_patch(version):
     major, minor, patch = parts
     return f"{major}.{minor}.{int(patch) + 1}"
 
-# Mock EDMC-specific modules before any plugin imports
+# ---------------------------------------------------------------------------
+# EDMC module mocks
+# ---------------------------------------------------------------------------
 _config = types.ModuleType("config")
 _config.appname = "EDMarketConnector"
 # PlaceHolder.py does `from config import config` and calls config.get_int(), config.get_str()
@@ -38,6 +57,7 @@ sys.modules["config"] = _config
 _monitor_mod = types.ModuleType("monitor")
 _monitor_obj = MagicMock()
 _monitor_obj.state = {"SystemName": "Sol"}
+_monitor_obj.ship.return_value = None
 _monitor_mod.monitor = _monitor_obj
 sys.modules["monitor"] = _monitor_mod
 
@@ -47,7 +67,8 @@ _edmcoverlay_mod = types.ModuleType("EDMCOverlay.edmcoverlay")
 
 class _MockOverlay:
     def __init__(self):
-        self._emit_payload = True  # marks it as modern overlay
+        pass
+
     def send_message(self, *args, **kwargs):
         pass
     def connect(self):
@@ -67,10 +88,13 @@ sys.modules["overlay_plugin"] = _overlay_plugin
 sys.modules["overlay_plugin.overlay_api"] = _overlay_api
 
 # Create a Tcl interpreter so tkinter variables work without a display
-import tkinter as tk
 _root = tk.Tcl()
 tk._default_root = _root
 
+
+# ---------------------------------------------------------------------------
+# Dummy test classes
+# ---------------------------------------------------------------------------
 
 class DummyWidget:
     def __init__(self):
@@ -98,10 +122,61 @@ class DummyWidget:
     def winfo_exists(self):
         return self._exists
 
+    def event_generate(self, *_args, **_kwargs):
+        pass
+
+    def bind(self, *_args, **_kwargs):
+        pass
+
 
 class DummyFrame(DummyWidget):
     def after(self, delay, func, *args):
         return func(*args)
+
+
+class DummyAC:
+    """Fake AutoCompleter widget for tests that set up plotter fields."""
+
+    def __init__(self, text, placeholder=""):
+        self._text = text
+        self.placeholder = placeholder
+
+    def get(self):
+        return self._text
+
+    def hide_list(self):
+        pass
+
+    def set_text(self, text, _placeholder_style=False):
+        self._text = text
+
+    def is_effectively_empty(self):
+        return not self._text or self._text == self.placeholder
+
+
+class DummyEntry:
+    """Fake Entry/Spinbox widget for tests that read form values."""
+
+    def __init__(self, value, minimum=0, maximum=100):
+        self._value = value
+        self._minimum = minimum
+        self._maximum = maximum
+
+    def get(self):
+        return self._value
+
+    def delete(self, *_args, **_kwargs):
+        self._value = ""
+
+    def insert(self, _index, value):
+        self._value = str(value)
+
+    def cget(self, key):
+        if key == "from":
+            return self._minimum
+        if key == "to":
+            return self._maximum
+        raise KeyError(key)
 
 
 class DummyParent:
@@ -121,8 +196,13 @@ class DummyParent:
         return 0
 
 
+# ---------------------------------------------------------------------------
+# Factory & fixture
+# ---------------------------------------------------------------------------
+
 def create_router(SpanshTools):
     tmpdir = tempfile.mkdtemp()
+    os.makedirs(os.path.join(tmpdir, "SpanshTools", "data"), exist_ok=True)
     with open(os.path.join(tmpdir, "version.json"), "w") as f:
         f.write(f'{{"version": "{PLUGIN_VERSION}"}}')
     router = SpanshTools(tmpdir)
@@ -158,18 +238,29 @@ def create_router(SpanshTools):
     router._overlay_loading = False
     router.update_gui = MagicMock()
     router.copy_waypoint = MagicMock()
+    # Compat shim: tests reference save_route_path (removed from source).
+    # Provide a path in the temp dir so JSON tests can derive .json paths.
+    router.save_route_path = os.path.join(tmpdir, "SpanshTools", "data", "route.csv")
     return router
 
 @pytest.fixture
 def router(tmp_path):
     """Provides a fresh, mocked router instance using pytest tmp_path."""
-    # Provide the actual plugin class dynamically if needed, 
-    # but we can safely import it now because EDMC is mocked above!
     from SpanshTools.core import SpanshTools
     router_instance = create_router(SpanshTools)
-    # create_router already makes a tempdir, but let's override it to Pytest's standard tmp_path
+    # create_router already makes a tempdir; clean it up and switch to pytest's tmp_path
+    original_tmpdir = router_instance._tmpdir
     router_instance._tmpdir = str(tmp_path)
     router_instance.plugin_dir = str(tmp_path)
-    router_instance.save_route_path = os.path.join(str(tmp_path), "route.csv")
-    router_instance.offset_file_path = os.path.join(str(tmp_path), "route.json")
-    return router_instance
+    data_dir = os.path.join(str(tmp_path), "SpanshTools", "data")
+    os.makedirs(data_dir, exist_ok=True)
+    router_instance.save_route_path = os.path.join(data_dir, "route.csv")
+    router_instance.plotter_settings_path = os.path.join(data_dir, "plotter_settings.json")
+    shutil.rmtree(original_tmpdir, ignore_errors=True)
+    try:
+        yield router_instance
+    finally:
+        for name, value in list(vars(router_instance).items()):
+            if isinstance(value, tk.Variable):
+                setattr(router_instance, name, None)
+        gc.collect()

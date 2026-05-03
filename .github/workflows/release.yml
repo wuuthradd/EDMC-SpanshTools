@@ -48,7 +48,7 @@ jobs:
           unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/load.py"
           unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/version.json"
           unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/SpanshTools/__init__.py"
-          unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/SpanshTools/fsd_specs.json"
+          unzip -Z1 "${ARCHIVE}" | grep -q "EDMC-SpanshTools/SpanshTools/data/"
           unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/tksheet/__init__.py"
 
       - name: Create GitHub Release

@@ -10,9 +10,13 @@ from functools import partial
 from itertools import accumulate, chain, filterfalse, islice, product, repeat
 from operator import attrgetter
 from re import IGNORECASE, escape, sub
-from timeit import default_timer
 from tkinter import ttk
 from typing import Any, Literal
+
+try:
+    from timeit import default_timer
+except ModuleNotFoundError:
+    from time import perf_counter as default_timer
 
 from .column_headers import ColumnHeaders
 from .constants import (
@@ -208,6 +212,7 @@ class Sheet(tk.Frame):
         tooltip_width: int = 210,
         tooltip_height: int = 210,
         tooltip_hover_delay: int = 1200,
+        row_snap_scroll: bool = False,
         # colors
         outline_thickness: int = 0,
         theme: str = "light blue",
@@ -5595,6 +5600,18 @@ class Sheet(tk.Frame):
         for c in (columns,) if isinstance(columns, int) else columns:
             set_readonly(self.MT.col_options, c, readonly)
         return self.set_refresh_timer(redraw)
+
+    def lock_column_width(
+        self,
+        columns: list[int] | int,
+        locked: bool = True,
+    ) -> Sheet:
+        for c in (columns,) if isinstance(columns, int) else columns:
+            if locked:
+                self.CH.locked_columns.add(c)
+            else:
+                self.CH.locked_columns.discard(c)
+        return self
 
     def readonly_cells(
         self,

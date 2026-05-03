@@ -1,23 +1,74 @@
-import logging
-import os
 import queue
 import threading
-from tkinter import *
+import tkinter as tk
 
-import requests
-from .PlaceHolder import PlaceHolder
-
-from config import appname
-
-# We need a name of plugin dir, not AutoCompleter.py dir
-plugin_name = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
-logger = logging.getLogger(f'{appname}.{plugin_name}')
-
-MAX_VISIBLE_RESULTS = 10
-DEBOUNCE_MS = 250
+from .web_utils import WebUtils
+from .widgets import PlaceHolder
+from .constants import MAX_VISIBLE_RESULTS, DEBOUNCE_MS, logger
 
 
 class AutoCompleter(PlaceHolder):
+    """Entry with dropdown auto-complete, populated by a background Spansh system search."""
+
+    def _current_trace_id(self):
+        return getattr(self, "_trace_id", None)
+
+    def is_effectively_empty(self):
+        value = self.get().strip()
+        return not value or value == self.placeholder
+
+    def _bind_change_trace(self):
+        self._trace_id = self.var.trace('w', self.changed)
+
+    def _replace_text_without_trace(self, text):
+        try:
+            trace_id = self._current_trace_id()
+            if trace_id is not None:
+                self.var.trace_remove("write", trace_id)
+        except Exception:
+            pass
+        self.delete(0, tk.END)
+        self.insert(0, text)
+        self._bind_change_trace()
+
+    def _cancel_debounce(self):
+        if self._debounce_id is None:
+            return
+        try:
+            self.after_cancel(self._debounce_id)
+        except Exception:
+            pass
+        self._debounce_id = None
+
+    def _discard_query_state(self):
+        self._query_generation += 1
+        self.hide_list()
+        self.has_selected = False
+
+    def _next_list_index(self, step):
+        selection = self.lb.curselection()
+        if not selection:
+            return 0 if step > 0 else None
+        index = int(selection[0])
+        next_index = index + step
+        if not (0 <= next_index < self.lb.size()):
+            return index
+        self.lb.selection_clear(first=index)
+        return next_index
+
+    def _move_selection(self, step, widget):
+        if not self.lb_up:
+            if step > 0:
+                self.changed()
+            return
+        index = self._next_list_index(step)
+        if index is None:
+            return
+        self.lb.selection_set(first=index)
+        self.lb.see(index)
+        if widget != "listbox":
+            self.lb.activate(index)
+
     def __init__(self, parent, placeholder, **kw):
         self.on_select = kw.pop("on_select", None)
         self.selected_items_provider = kw.pop("selected_items_provider", None)
@@ -26,7 +77,7 @@ class AutoCompleter(PlaceHolder):
         entry_kw = dict(kw)
         listbox_kw = {key: kw[key] for key in ("width", "font") if key in kw}
 
-        self.lb = Listbox(self.parent, selectmode=SINGLE, **listbox_kw)
+        self.lb = tk.Listbox(self.parent, selectmode=tk.SINGLE, **listbox_kw)
         self.lb_up = False
         self.has_selected = False
         self.queue = queue.Queue()
@@ -39,19 +90,23 @@ class AutoCompleter(PlaceHolder):
         self._pending_query = None
         self._destroyed = False
         self._result_values = []
+        self._trace_id = None
 
         PlaceHolder.__init__(self, parent, placeholder, **entry_kw)
-        self.var.traceid = self.var.trace('w', self.changed)
+        if self._trace_id is None:
+            self._bind_change_trace()
 
-        # Create right click menu
-        self.menu = Menu(self.parent, tearoff=0)
+        self.menu = tk.Menu(self.parent, tearoff=0)
         self.menu.add_command(label="Cut")
         self.menu.add_command(label="Copy")
         self.menu.add_command(label="Paste")
 
         self.bind("<Any-Key>", self.keypressed)
         self.lb.bind("<Any-Key>", self.keypressed)
-        self.bind('<Control-KeyRelease-a>', self.select_all)
+        self.bind("<Return>", self._handle_return)
+        self.bind("<KP_Enter>", self._handle_return)
+        self.lb.bind("<Return>", self._handle_return)
+        self.lb.bind("<KP_Enter>", self._handle_return)
         self.bind('<Button-3>', self.show_menu)
         self.lb.bind("<ButtonRelease-1>", self.selection)
         self.bind("<FocusOut>", self.ac_foc_out)
@@ -62,17 +117,12 @@ class AutoCompleter(PlaceHolder):
 
     def _schedule_update(self):
         if not self._destroyed and self._update_id is None:
-            self._update_id = self.after(100, self.update_me)
+            self._update_id = self.after(100, self._flush_results_queue)
 
     def _on_destroy(self, event=None):
         self._destroyed = True
         self._query_generation += 1
-        if self._debounce_id is not None:
-            try:
-                self.after_cancel(self._debounce_id)
-            except Exception:
-                pass
-            self._debounce_id = None
+        self._cancel_debounce()
         if self._update_id is not None:
             try:
                 self.after_cancel(self._update_id)
@@ -83,6 +133,13 @@ class AutoCompleter(PlaceHolder):
             self._pending_query = None
             self._active_queries = 0
         self._query_event.set()
+        self.lb_up = False
+        for widget in (getattr(self, "lb", None), getattr(self, "menu", None)):
+            try:
+                if widget is not None:
+                    widget.destroy()
+            except Exception:
+                pass
 
     def _log_unexpected(self, context):
         logger.warning(context, exc_info=True)
@@ -103,10 +160,19 @@ class AutoCompleter(PlaceHolder):
                                  command=lambda: w.event_generate("<<Copy>>"))
         self.menu.entryconfigure("Paste",
                                  command=lambda: w.event_generate("<<Paste>>"))
-        self.menu.tk.call("tk_popup", self.menu, e.x_root, e.y_root)
+        try:
+            self.menu.tk_popup(e.x_root, e.y_root)
+        finally:
+            self.menu.grab_release()
 
     def keypressed(self, event):
         key = event.keysym
+        if self._placeholder_visible and event.char and event.char.isprintable():
+            self.set_default_style()
+            self.delete(0, tk.END)
+            self._placeholder_visible = False
+            self.has_selected = False
+            return
         if key == 'Down':
             self.down(event.widget.widgetName)
         elif key == 'Up':
@@ -117,38 +183,25 @@ class AutoCompleter(PlaceHolder):
         elif key in ['Escape', 'Tab', 'ISO_Left_Tab'] and self.lb_up:
             self.hide_list()
 
-    def select_all(self, event):
-        event.widget.event_generate('<<SelectAll>>')
+    def _handle_return(self, event=None):
+        if self.lb_up:
+            self.selection()
+            return "break"
 
     def changed(self, name=None, index=None, mode=None):
         if self._destroyed:
             return
+        if self._error_state:
+            self.set_default_style()
         value = self.var.get()
         stripped = value.strip()
+        self._cancel_debounce()
         if self.has_selected or stripped == self.placeholder or len(stripped) < 3:
-            if self._debounce_id is not None:
-                try:
-                    self.after_cancel(self._debounce_id)
-                except Exception:
-                    pass
-                self._debounce_id = None
-            self._query_generation += 1
-            self.hide_list()
-            self.has_selected = False
-        else:
-            # Cancel any pending debounce and schedule a new one
-            if self._debounce_id is not None:
-                try:
-                    self.after_cancel(self._debounce_id)
-                except Exception:
-                    pass
-            self._debounce_id = self.after(
-                DEBOUNCE_MS,
-                lambda v=value: self._fire_query(v)
-            )
+            self._discard_query_state()
+            return
+        self._debounce_id = self.after(DEBOUNCE_MS, lambda v=value: self._queue_query(v))
 
-    def _fire_query(self, value):
-        """Queue the latest query for a shared background worker."""
+    def _queue_query(self, value):
         self._debounce_id = None
         if self._destroyed:
             return
@@ -178,7 +231,7 @@ class AutoCompleter(PlaceHolder):
                         self._query_event.clear()
                         break
                     self._pending_query = None
-                self.query_systems(*item)
+                self._fetch_query_results(*item)
                 if self._destroyed:
                     return
 
@@ -191,11 +244,9 @@ class AutoCompleter(PlaceHolder):
             if selected_index >= len(self._result_values):
                 return
             self.has_selected = True
-            self.var.trace_vdelete("w", self.var.traceid)
-            self.var.set(self._result_values[selected_index])
+            self._replace_text_without_trace(self._result_values[selected_index])
             self.hide_list()
-            self.icursor(END)
-            self.var.traceid = self.var.trace('w', self.changed)
+            self.icursor(tk.END)
             if callable(self.on_select):
                 try:
                     self.on_select(self.get().strip())
@@ -203,42 +254,19 @@ class AutoCompleter(PlaceHolder):
                     self._log_unexpected("AutoCompleter on_select callback failed")
 
     def up(self, widget):
-        if self.lb_up:
-            if self.lb.curselection() == ():
-                index = 0
-            else:
-                index = int(self.lb.curselection()[0])
-            if index > 0:
-                self.lb.selection_clear(first=index)
-                index -= 1
-                self.lb.selection_set(first=index)
-                if widget != "listbox":
-                    self.lb.activate(index)
+        self._move_selection(-1, widget)
 
     def down(self, widget):
-        if self.lb_up:
-            if self.lb.curselection() == ():
-                index = 0
-            else:
-                index = int(self.lb.curselection()[0])
-                if index + 1 < self.lb.size():
-                    self.lb.selection_clear(first=index)
-                    index += 1
-
-            self.lb.selection_set(first=index)
-            if widget != "listbox":
-                self.lb.activate(index)
-        else:
-            self.changed()
+        self._move_selection(1, widget)
 
     def show_results(self, results):
         if self._destroyed:
             return
         if results:
             self._result_values = [str(value) for value in results]
-            self.lb.delete(0, END)
+            self.lb.delete(0, tk.END)
             for w in self._build_display_results(self._result_values):
-                self.lb.insert(END, w)
+                self.lb.insert(tk.END, w)
 
             self.show_list(len(results))
         else:
@@ -249,6 +277,7 @@ class AutoCompleter(PlaceHolder):
     def show_list(self, height):
         self.lb["height"] = min(height, MAX_VISIBLE_RESULTS)
         if not self.lb_up and self.parent.focus_get() is self:
+            # The popup list inherits the entry's grid position and is shown on the next row.
             info = self.grid_info()
             if info:
                 grid_kwargs = {}
@@ -291,42 +320,30 @@ class AutoCompleter(PlaceHolder):
             display_results.append(f"✓ {result}")
         return display_results
 
-    def query_systems(self, inp, generation=None):
+    def _fetch_query_results(self, inp, generation=None):
         inp = inp.strip()
         try:
             if inp != self.placeholder and len(inp) >= 3:
-                url = "https://spansh.co.uk/api/systems?"
                 try:
-                    results = requests.get(url,
-                                           params={'q': inp},
-                                           headers={'User-Agent': "EDMC_SpanshTools 1.0"},
-                                           timeout=3)
-
+                    lista = WebUtils.spansh_get("/api/systems", params={'q': inp}, timeout=3)
                     if generation is not None and generation != self._query_generation:
                         return
-
-                    if results.status_code != 200:
-                        logger.debug("AutoCompleter query returned status %s", results.status_code)
-                        self.write([], generation=generation)
+                    self._enqueue_results(lista if isinstance(lista, list) else [], generation=generation)
+                except Exception:
+                    # WebUtils handles logging, we just need to ensure we don't crash the background thread
+                    if generation is not None and generation != self._query_generation:
                         return
-
-                    lista = results.json()
-                    self.write(lista if isinstance(lista, list) else [], generation=generation)
-                except (requests.RequestException, ValueError):
-                    self._log_unexpected("AutoCompleter query failed")
-                    self.write([], generation=generation)
+                    self._enqueue_results([], generation=generation)
             else:
-                self.write([], generation=generation)
+                self._enqueue_results([], generation=generation)
         finally:
             with self._query_lock:
                 self._active_queries = 1 if self._pending_query is not None else 0
-            self._schedule_update()
 
-    def write(self, lista, generation=None):
+    def _enqueue_results(self, lista, generation=None):
         self.queue.put((generation, lista))
 
-
-    def update_me(self):
+    def _flush_results_queue(self):
         if self._destroyed:
             self._update_id = None
             return
@@ -352,20 +369,4 @@ class AutoCompleter(PlaceHolder):
         else:
             self._placeholder_visible = False
             self.set_default_style()
-
-        try:
-            self.var.trace_vdelete("w", self.var.traceid)
-        except Exception:
-            pass
-        finally:
-            self.delete(0, END)
-            self.insert(0, text)
-            self.var.traceid = self.var.trace('w', self.changed)
-
-
-if __name__ == '__main__':
-    root = Tk()
-
-    widget = AutoCompleter(root, "Test")
-    widget.grid(row=0)
-    root.mainloop()
+        self._replace_text_without_trace(text)

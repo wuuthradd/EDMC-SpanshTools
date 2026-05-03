@@ -3,7 +3,7 @@
 
 Default behavior:
 - fetch latest Coriolis FSD list
-- add only missing FSD symbols to ``SpanshTools/fsd_specs.json``
+- add only missing FSD symbols to ``SpanshTools/data/fsd_specs.json``
 - report existing symbols whose values differ
 
 Optional behavior:
@@ -31,9 +31,42 @@ CORIOLIS_FSD_URL = (
 
 
 def _load_fsd_data_module():
-    module_path = pathlib.Path(__file__).resolve().parent / "SpanshTools" / "fsd_data.py"
-    spec = importlib.util.spec_from_file_location("spanshtools_fsd_data", module_path)
+    import types
+
+    parent = pathlib.Path(__file__).resolve().parent
+    pkg_dir = str(parent / "SpanshTools")
+
+    # Stub EDMC host modules when running standalone (harmless if already mocked)
+    for name in ("config", "monitor"):
+        if name not in sys.modules:
+            stub = types.ModuleType(name)
+            if name == "config":
+                stub.appname = "EDMarketConnector"
+                stub.config = types.SimpleNamespace(
+                    get_str=lambda *a, **kw: "",
+                    get_int=lambda *a, **kw: 0,
+                    set=lambda *a, **kw: None,
+                )
+            elif name == "monitor":
+                stub.monitor = types.SimpleNamespace(cmdr=None, state={})
+            sys.modules[name] = stub
+
+    # Register a minimal package so relative imports inside ship_moduling resolve
+    if "SpanshTools" not in sys.modules:
+        pkg = types.ModuleType("SpanshTools")
+        pkg.__path__ = [pkg_dir]
+        pkg.__package__ = "SpanshTools"
+        sys.modules["SpanshTools"] = pkg
+
+    module_path = parent / "SpanshTools" / "ship_moduling.py"
+    spec = importlib.util.spec_from_file_location(
+        "SpanshTools.ship_moduling", str(module_path),
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Could not load module spec for {module_path}")
     module = importlib.util.module_from_spec(spec)
+    module.__package__ = "SpanshTools"
+    sys.modules["SpanshTools.ship_moduling"] = module
     spec.loader.exec_module(module)
     return module
 

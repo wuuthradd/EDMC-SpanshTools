@@ -374,5 +374,6 @@ def new_sheet_options() -> DotDict:
             "tooltip_width": 210,
             "tooltip_height": 210,
             "tooltip_hover_delay": 1200,
+            "row_snap_scroll": False,
         }
     )

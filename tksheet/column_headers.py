@@ -98,6 +98,7 @@ class ColumnHeaders(tk.Canvas):
         self.drag_selection_binding_func = None
         self.column_width_resize_func = None
         self.width_resizing_enabled = False
+        self.locked_columns = set()
         self.height_resizing_enabled = False
         self.double_click_resizing_enabled = False
         self.col_selection_enabled = False
@@ -1585,7 +1586,7 @@ class ColumnHeaders(tk.Canvas):
             ]
             for c in range(grid_start_col, grid_end_col):
                 draw_x = self.MT.col_positions[c]
-                if c and self.width_resizing_enabled:
+                if c and self.width_resizing_enabled and c not in self.locked_columns and (c - 1) not in self.locked_columns:
                     self.visible_col_dividers[c] = (draw_x - 2, 1, draw_x + 2, yend)
                 points.extend(
                     (
