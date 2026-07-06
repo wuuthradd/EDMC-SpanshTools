@@ -2196,7 +2196,14 @@ class SpanshTools(OverlayMixin, PlottersMixin, SearchToolsMixin, ShipModulingMix
         except Exception:
             self._close_csv_viewer()
             return
-        self.csv_viewer.show(force_refresh=True)
+        try:
+            is_hidden = self.csv_viewer_win.state() == 'withdrawn'
+        except Exception:
+            is_hidden = False
+        if is_hidden:
+            self.csv_viewer._refresh_viewer_in_place(preserve_view=True)
+        else:
+            self.csv_viewer.show(force_refresh=True)
 
     def _close_csv_viewer_if_open(self):
         if not self.csv_viewer_win:

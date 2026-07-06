@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.1
+
+- Fixed route viewer reappearing after being closed when jumping to a new system.
+
 ## v1.1.0
 
 - Added ship list for saving, importing, and managing ship loadouts with per-ship FSD data for the Galaxy Plotter.
