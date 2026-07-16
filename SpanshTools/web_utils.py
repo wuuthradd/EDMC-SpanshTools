@@ -1,5 +1,3 @@
-import json
-import os
 import webbrowser
 from time import sleep
 from urllib.parse import quote_plus
@@ -7,26 +5,11 @@ from urllib.parse import quote_plus
 import requests
 from requests import RequestException
 
-from .constants import _SpanshPollError, _SpanshPollTimeout, logger
+from .constants import __version__, _SpanshPollError, _SpanshPollTimeout, logger
 
 DEFAULT_TIMEOUT = 10
 
-
-def _load_plugin_version():
-    try:
-        _vpath = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)), "version.json"
-        )
-        with open(_vpath, "r", encoding="utf-8") as f:
-            return json.load(f).get("version", "")
-    except Exception:
-        return ""
-
-
-_PLUGIN_VERSION = _load_plugin_version()
-USER_AGENT = (
-    f"EDMC_SpanshTools/{_PLUGIN_VERSION}" if _PLUGIN_VERSION else "EDMC_SpanshTools"
-)
+USER_AGENT = f"EDMC_SpanshTools/{__version__}"
 
 
 class WebOpenError(Exception):

@@ -1,21 +1,25 @@
 """EDMC plugin entry point — bridges EDMC lifecycle hooks to SpanshTools."""
 
-spansh_tools = None
+import os
+
+SpanshTools = None
 
 
 def _require_plugin():
-    if spansh_tools is None:
+    if SpanshTools is None:
         raise RuntimeError("SpanshTools plugin is not initialized")
-    return spansh_tools
+    return SpanshTools
 
 
 def _start_plugin(plugin_dir):
-    global spansh_tools
+    global SpanshTools, __version__
 
-    from SpanshTools import SpanshTools
+    from SpanshTools import SpanshTools as SpanshToolsClass
+    from SpanshTools.constants import __version__ as _ver
 
-    spansh_tools = SpanshTools(plugin_dir)
-    return 'spansh_tools'
+    __version__ = _ver
+    SpanshTools = SpanshToolsClass(plugin_dir)
+    return 'SpanshTools'
 
 
 def plugin_start3(plugin_dir):
@@ -30,26 +34,26 @@ def plugin_start(plugin_dir):
 
 def plugin_stop():
     """EDMC hook: shut down the plugin and install any staged update."""
-    global spansh_tools
-    if spansh_tools is None:
+    global SpanshTools
+    if SpanshTools is None:
         return
     shutdown_ok = True
     try:
-        shutdown_ok = bool(spansh_tools.shutdown())
+        shutdown_ok = bool(SpanshTools.shutdown())
     except Exception:
         shutdown_ok = False
         from SpanshTools.constants import logger
         logger.warning("Error while shutting down SpanshTools", exc_info=True)
 
-    if shutdown_ok and spansh_tools.update_available and spansh_tools.has_staged_update():
-        spansh_tools.install_staged_update()
+    if shutdown_ok and SpanshTools.update_available and SpanshTools.has_staged_update():
+        SpanshTools.install_staged_update()
 
-    spansh_tools = None
+    SpanshTools = None
 
 
 def journal_entry(cmdr, is_beta, system, station, entry, state):
     """EDMC hook: forward journal events to the plugin for route tracking."""
-    plugin = spansh_tools
+    plugin = SpanshTools
     if plugin is None or not getattr(plugin, 'frame', None):
         return
     if cmdr:
@@ -59,7 +63,7 @@ def journal_entry(cmdr, is_beta, system, station, entry, state):
 
 def dashboard_entry(cmdr, is_beta, entry):
     """EDMC hook: forward Status.json updates (fuel, flags) to the plugin."""
-    plugin = spansh_tools
+    plugin = SpanshTools
     if plugin is None or not getattr(plugin, 'frame', None):
         return
     if cmdr:

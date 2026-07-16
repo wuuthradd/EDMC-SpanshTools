@@ -17,6 +17,7 @@ from monitor import monitor
 from .constants import (
     ROUTE_PLANNERS,
     SEARCH_OPTIONS,
+    __version__,
     logger,
 )
 from .overlay import OverlayMixin
@@ -78,9 +79,7 @@ class SpanshTools(OverlayMixin, PlottersMixin, SearchToolsMixin, ShipModulingMix
     # --- Initialization ---
 
     def __init__(self, plugin_dir):
-        version_file = os.path.join(plugin_dir, "version.json")
-        with open(version_file, 'r', encoding='utf-8') as version_fd:
-            self.plugin_version = json.load(version_fd).get("version", "0.0.0")
+        self.plugin_version = __version__
 
         self.update_available = False
         self.spansh_updater = None

@@ -14,9 +14,6 @@ from unittest.mock import MagicMock
 _TESTS_DIR = os.path.dirname(__file__)
 _PLUGIN_ROOT = os.path.dirname(_TESTS_DIR)
 
-with open(os.path.join(_PLUGIN_ROOT, "version.json"), "r", encoding="utf-8") as _handle:
-    PLUGIN_VERSION = json.load(_handle)["version"]
-
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -90,6 +87,9 @@ sys.modules["overlay_plugin.overlay_api"] = _overlay_api
 # Create a Tcl interpreter so tkinter variables work without a display
 _root = tk.Tcl()
 tk._default_root = _root
+
+# Import version after EDMC mocks are in place
+from SpanshTools.constants import __version__ as PLUGIN_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -203,8 +203,6 @@ class DummyParent:
 def create_router(SpanshTools):
     tmpdir = tempfile.mkdtemp()
     os.makedirs(os.path.join(tmpdir, "SpanshTools", "data"), exist_ok=True)
-    with open(os.path.join(tmpdir, "version.json"), "w") as f:
-        f.write(f'{{"version": "{PLUGIN_VERSION}"}}')
     router = SpanshTools(tmpdir)
     router._tmpdir = tmpdir
     router.parent = DummyParent()
