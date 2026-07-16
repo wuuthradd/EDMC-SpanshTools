@@ -18,10 +18,10 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Validate tag matches version.json
+      - name: Validate tag matches __version__
         run: |
           TAG_VERSION="${{ steps.version.outputs.version }}"
-          FILE_VERSION="$(python -c 'import json; print(json.load(open("version.json", "r", encoding="utf-8"))["version"])')"
+          FILE_VERSION="$(grep -oP '^__version__\s*=\s*"\K[^"]+' SpanshTools/constants.py)"
           test "${TAG_VERSION}" = "${FILE_VERSION}"
 
       - name: Build release archive
@@ -31,8 +31,9 @@ jobs:
           ARCHIVE="${ROOT}-v${VERSION}.zip"
 
           mkdir -p "dist/${ROOT}"
-          cp load.py version.json "dist/${ROOT}/"
+          cp load.py "dist/${ROOT}/"
           cp -r SpanshTools tksheet "dist/${ROOT}/"
+          echo "{\"version\": \"${VERSION}\"}" > "dist/${ROOT}/version.json"
 
           find "dist/${ROOT}" -type d -name __pycache__ -prune -exec rm -rf {} +
           find "dist/${ROOT}" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
@@ -46,13 +47,24 @@ jobs:
         run: |
           ARCHIVE="EDMC-SpanshTools-v${{ steps.version.outputs.version }}.zip"
           unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/load.py"
-          unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/version.json"
           unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/SpanshTools/__init__.py"
           unzip -Z1 "${ARCHIVE}" | grep -q "EDMC-SpanshTools/SpanshTools/data/"
           unzip -Z1 "${ARCHIVE}" | grep -qx "EDMC-SpanshTools/tksheet/__init__.py"
+
+      - name: Extract release notes from CHANGELOG.md
+        id: changelog
+        run: |
+          TAG="v${{ steps.version.outputs.version }}"
+          NOTES=$(sed -n "/^## ${TAG}$/,/^## /{/^## /d;p;}" CHANGELOG.md)
+          {
+            echo "notes<<EOF"
+            echo "$NOTES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: v${{ steps.version.outputs.version }}
+          body: ${{ steps.changelog.outputs.notes }}
           files: EDMC-SpanshTools-v${{ steps.version.outputs.version }}.zip

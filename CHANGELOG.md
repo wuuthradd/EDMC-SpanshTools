@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.2
+
+- Minor changes due to plugin browser eligibility.
+
 ## v1.1.1
 
 - Fixed route viewer reappearing after being closed when jumping to a new system.

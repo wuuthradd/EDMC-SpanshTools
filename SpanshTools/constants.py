@@ -5,6 +5,8 @@ import os
 
 from config import appname
 
+__version__ = "1.1.2"
+
 _plugin_name = os.path.basename(os.path.dirname(os.path.dirname(__file__)))
 logger = logging.getLogger(f'{appname}.{_plugin_name}')
 
@@ -35,7 +37,6 @@ RELEASE_ARCHIVE_ROOT = "EDMC-SpanshTools"
 RUNTIME_PACKAGE_DIRS = ("SpanshTools", "tksheet")
 REQUIRED_ARCHIVE_PATHS = (
     "load.py",
-    "version.json",
     "SpanshTools/__init__.py",
     "SpanshTools/data/fsd_specs.json",
     "SpanshTools/data/ship_type_names.json",

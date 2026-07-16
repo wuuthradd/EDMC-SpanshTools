@@ -40,8 +40,6 @@ def _write_plugin_tree(plugin_dir, *, load_text="old-load", version=PLUGIN_VERSI
     os.makedirs(os.path.join(plugin_dir, "tksheet"), exist_ok=True)
     with open(os.path.join(plugin_dir, "load.py"), "w", encoding="utf-8") as f:
         f.write(load_text)
-    with open(os.path.join(plugin_dir, "version.json"), "w", encoding="utf-8") as f:
-        json.dump({"version": version}, f)
     with open(os.path.join(plugin_dir, "SpanshTools", "__init__.py"), "w", encoding="utf-8") as f:
         f.write(package_init_text)
     with open(os.path.join(plugin_dir, "SpanshTools", "data", "fsd_specs.json"), "w", encoding="utf-8") as f:
@@ -58,7 +56,6 @@ def _build_release_zip(*, load_text="new-load", version=None,
     with zipfile.ZipFile(buf, "w") as archive:
         prefix = f"{RELEASE_ARCHIVE_ROOT}/"
         archive.writestr(prefix + "load.py", load_text)
-        archive.writestr(prefix + "version.json", json.dumps({"version": version}))
         archive.writestr(prefix + "SpanshTools/__init__.py", package_init_text)
         archive.writestr(prefix + "SpanshTools/data/fsd_specs.json",
                          json.dumps(_fsd_specs_payload()))
@@ -229,8 +226,6 @@ def test_install_rejects_unsafe_archive_paths(tmp_path):
     with zipfile.ZipFile(os.path.join(plugin_dir, STAGED_ARCHIVE_NAME), "w") as archive:
         prefix = f"{RELEASE_ARCHIVE_ROOT}/"
         archive.writestr(prefix + "load.py", "new-load")
-        archive.writestr(prefix + "version.json",
-                         json.dumps({"version": bump_patch(PLUGIN_VERSION)}))
         archive.writestr(prefix + "SpanshTools/__init__.py", "new-package")
         archive.writestr(prefix + "SpanshTools/data/fsd_specs.json", json.dumps({}))
         archive.writestr(prefix + "tksheet/__init__.py", "new-sheet")
